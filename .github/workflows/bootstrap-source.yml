@@ -2,7 +2,7 @@ name: Bootstrap source
 on:
   push:
     paths:
-      - '.bootstrap/fx-full.tar.gz.b64'
+      - '.bootstrap/READY'
 permissions:
   contents: write
 jobs:
@@ -16,7 +16,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d .bootstrap/fx-full.tar.gz.b64 > /tmp/fx-full.tar.gz
+          cat .bootstrap/part-* > /tmp/fx-full.tar.gz.b64
+          base64 -d /tmp/fx-full.tar.gz.b64 > /tmp/fx-full.tar.gz
+          tar -tzf /tmp/fx-full.tar.gz >/dev/null
           find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .bootstrap -exec rm -rf {} +
           tar -xzf /tmp/fx-full.tar.gz -C .
           rm -rf .bootstrap
