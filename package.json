@@ -2,7 +2,9 @@
   "name": "forex-trader-video-intelligence",
   "version": "1.0.0",
   "private": true,
-  "engines": {"node": "22.x"},
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/prisma-generate.mjs && next build",
@@ -22,7 +24,6 @@
     "lucide-react": "^0.468.0",
     "next": "^15.5.2",
     "openai": "7.4.0",
-    "pino": "^9.9.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "sharp": "^0.34.3",
