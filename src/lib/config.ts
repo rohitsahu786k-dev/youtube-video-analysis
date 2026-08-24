@@ -1,10 +1,10 @@
 import { z } from "zod";
 const emptyToUndefined=(v:unknown)=>v===""?undefined:v;
 const bool=z.preprocess(v=>emptyToUndefined(v)===undefined?undefined:v===true||v==="true",z.boolean());
-const int=(n:number)=>z.preprocess(emptyToUndefined,z.coerce.number().int().positive().default(n));
-const text=(fallback:string)=>z.preprocess(emptyToUndefined,z.string().default(fallback));
+const int=(n:number)=>z.preprocess(emptyToUndefined,z.coerce.number().int().positive().default(n).catch(n));
+const text=(fallback:string)=>z.preprocess(emptyToUndefined,z.string().default(fallback).catch(fallback));
 const optionalText=z.preprocess(emptyToUndefined,z.string().optional());
-const processingMode=z.preprocess(emptyToUndefined,z.enum(["standard","batch"]).default("standard"));
+const processingMode=z.preprocess(emptyToUndefined,z.enum(["standard","batch"]).default("standard").catch("standard"));
 const schema=z.object({
   MOCK_AI_MODE:bool.default(true),OPENAI_API_KEY:optionalText,OPENAI_ANALYSIS_MODEL:text("gpt-5.6-luna"),OPENAI_REASONING_MODEL:text("gpt-5.6-terra"),OPENAI_FINAL_MODEL:text("gpt-5.6-sol"),OPENAI_TRANSCRIBE_MODEL:text("gpt-transcribe"),OPENAI_EMBEDDING_MODEL:text("text-embedding-3-small"),YOUTUBE_API_KEY:optionalText,DATABASE_URL:optionalText,REDIS_URL:optionalText,CLOUDINARY_URL:optionalText,STORAGE_PATH:text("./storage"),AI_PROCESSING_MODE:processingMode,VIDEO_PROCESS_CONCURRENCY:int(2),AI_ANALYSIS_CONCURRENCY:int(5),FRAME_ANALYSIS_CONCURRENCY:int(3),FRAME_EVENT_BEFORE_SECONDS:int(15),FRAME_EVENT_AFTER_SECONDS:int(30),FRAME_INTERVAL_SECONDS:int(5),MAX_FRAMES_PER_EVENT:int(8),MAX_CANDIDATE_EVENTS_PER_VIDEO:int(100),OPENAI_COST_TRACKING:bool.default(true),OPENAI_PRICING_JSON:optionalText,LOG_LEVEL:text("info")
 });
