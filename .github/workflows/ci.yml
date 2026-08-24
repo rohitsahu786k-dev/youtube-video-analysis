@@ -9,7 +9,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: postgresql://preview:preview@localhost:5432/preview
+      DATABASE_URL: mongodb://localhost:27017/preview
       MOCK_AI_MODE: "true"
     steps:
       - uses: actions/checkout@v4
