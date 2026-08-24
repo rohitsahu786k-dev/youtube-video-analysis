@@ -1,0 +1,4 @@
+export function fmt(seconds:number){const s=Math.max(0,Math.floor(seconds)),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),x=s%60;return h?`${h}:${String(m).padStart(2,"0")}:${String(x).padStart(2,"0")}`:`${m}:${String(x).padStart(2,"0")}`;}
+export function yt(videoId:string,seconds=0){return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}${seconds?`&t=${Math.floor(seconds)}s`:""}`;}
+export function frameTimes(t:number,duration:number,max=8){const arr=[t-15,t-10,t-5,t,t+5,t+10,t+20,t+30].map(v=>Math.max(0,Math.min(duration,v)));return [...new Set(arr)].slice(0,max).sort((a,b)=>a-b);}
+export function rateLimit(key:string,limit=30){const g=globalThis as unknown as {rates?:Map<string,{n:number;reset:number}>};g.rates??=new Map();const now=Date.now(),v=g.rates.get(key);if(!v||v.reset<now){g.rates.set(key,{n:1,reset:now+60000});return true;}v.n++;return v.n<=limit;}

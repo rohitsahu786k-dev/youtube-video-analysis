@@ -1,8 +1,2 @@
 # Database
-
-PostgreSQL is modeled through Prisma. Core relationships are:
-Trader → Playlist/Video → Transcript Segment/Event/Frame → Trade → Trade Event → Pattern/Evidence.
-
-`KnowledgeChunk.embedding` is a pgvector-compatible `vector(1536)` unsupported Prisma field. Create the `vector` extension before vector-index migrations. For production semantic search, create an HNSW or IVFFlat index appropriate to the embedding dimension/model and workload.
-
-Important models: `Video`, `VideoProcessingJob`, `TranscriptSegment`, `VideoEvent`, `Frame`, `FrameAnalysis`, `Trade`, `TradeEvent`, `StrategyPattern`, `KnowledgeChunk`, `AnalysisRun`, `AiUsage`, `Contradiction`.
+Prisma models traders, playlists, videos, processing jobs, timestamped transcript segments, video events, frames, frame analyses, trades, trade events, strategy patterns, knowledge chunks, AI usage and contradictions. PostgreSQL with pgvector is the production target. Enable the `vector` extension before creating a vector index for `KnowledgeChunk.embedding`.

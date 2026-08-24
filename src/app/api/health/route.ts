@@ -1,0 +1,1 @@
+import { NextResponse } from "next/server";import { env } from "@/lib/config";export async function GET(){return NextResponse.json({status:"ok",mode:env.MOCK_AI_MODE?"demo":"real",timestamp:new Date().toISOString(),services:{database:!!env.DATABASE_URL,redis:!!env.REDIS_URL,openai:!!env.OPENAI_API_KEY,youtube:!!env.YOUTUBE_API_KEY}})}

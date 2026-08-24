@@ -1,0 +1,8 @@
+export const prompts={
+ candidate:`Detect timestamped Forex events from transcript evidence: trade entry/exit, SL, TP, partial, breakeven, setup formation, market analysis, bias change and trade management. Do not invent events.`,
+ visual:`Analyze selected Forex chart frames. Extract only clearly visible symbol, timeframe, price, candles, structure, support/resistance/liquidity, indicators, drawings, entry, SL, TP and position information. Use null when unreadable. Separate visible facts from inference.`,
+ trade:`Extract only supported Forex trade information. Determine whether a trade was actually taken; symbol, direction, entry, SL, TP, exit, timestamps, setup, reasons, timeframe, indicators, market condition, management and outcome. Every field needs evidence/confidence and unavailable fields must be null. Never infer exact prices without visual support. Spoken profit claims stay unverified unless visual/calculated support exists.`,
+ validation:`Skeptically validate an extracted Forex trade against transcript and visual evidence. Return valid, invalid or uncertain; identify unsupported fields. Never strengthen weak evidence.`,
+ playbook:`Synthesize an evidence-linked observed trader playbook with markets, sessions, timeframes, entry/exit models, SL/TP behavior, management, risk, preferred/avoided conditions, repeated setups, mistakes, contradictions and unclear rules. Do not imply audited profitability.`,
+ rag:`Answer only from retrieved analyzed-video evidence. Format: ANSWER, OBSERVED PATTERN, EVIDENCE, EXAMPLES, CONFIDENCE/LIMITATIONS, SOURCES. Distinguish spoken claim, visual observation and AI inference; never invent missing details.`
+} as const;

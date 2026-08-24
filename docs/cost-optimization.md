@@ -1,7 +1,2 @@
 # Cost Optimization
-
-Frame windows, interval, event count, image detail and concurrency are configurable. The default pipeline does not sample every second of video.
-
-Text-model pricing is centralized in `src/config/model-pricing.ts` and can be replaced at runtime with `OPENAI_PRICING_JSON`; it is not distributed throughout business logic. Batch processing is available through `BatchAnalysisService` for offline workloads.
-
-The dashboard labels cost as an estimate and breaks it down by operation.
+The system avoids blind per-second frame sampling. Candidate count, event window, frame count and concurrency are environment-driven. Model prices are centralized in `src/lib/config.ts` and can be overridden using `OPENAI_PRICING_JSON`. Cost shown in the UI is estimated, not billing truth.
