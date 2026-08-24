@@ -6,6 +6,7 @@ node_modules
 !.env.example
 .vercel
 .tools
+.deploy-keys
 coverage
 storage/*
 !storage/.gitkeep
