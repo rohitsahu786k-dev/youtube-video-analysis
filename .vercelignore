@@ -1,0 +1,13 @@
+.env
+.env.local
+.env.*.local
+.next
+node_modules
+coverage
+storage/*
+!storage/.gitkeep
+.tools
+*.log
+tsconfig.tsbuildinfo
+Dockerfile.worker
+docker-compose.yml
