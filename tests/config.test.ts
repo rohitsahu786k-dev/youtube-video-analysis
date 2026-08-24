@@ -4,8 +4,8 @@ import { parseEnv } from "@/lib/config";
 describe("config",()=>{
   it("uses defaults for blank Vercel environment values",()=>{
     const env=parseEnv({
-      AI_PROCESSING_MODE:"",
-      VIDEO_PROCESS_CONCURRENCY:"",
+      AI_PROCESSING_MODE:"demo",
+      VIDEO_PROCESS_CONCURRENCY:"0",
       AI_ANALYSIS_CONCURRENCY:"",
       FRAME_ANALYSIS_CONCURRENCY:"",
       FRAME_EVENT_BEFORE_SECONDS:"",
