@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProcessingStatus { QUEUED DOWNLOADING EXTRACTING_AUDIO TRANSCRIBING DETECTING_EVENTS EXTRACTING_FRAMES ANALYZING_VISUALS EXTRACTING_TRADES VALIDATING INDEXING COMPLETED FAILED CANCELLED PAUSED }
+enum EvidenceLevel { DIRECT STRONG_INFERENCE WEAK_INFERENCE UNKNOWN }
+enum SourceType { TRANSCRIPT VISUAL AI_INFERENCE CALCULATED }
+enum TradeDirection { LONG SHORT }
+enum TradeResult { WIN LOSS BREAKEVEN OPEN UNKNOWN }
+enum ValidationStatus { PENDING VALID INVALID UNCERTAIN }
+enum ProfitVerificationStatus { UNVERIFIED VISUALLY_SUPPORTED CALCULATED UNKNOWN }
+
+model User {
+  id        String   @id @default(cuid())
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("users")
+}
+
+model Trader {
+  id        String   @id @default(cuid())
+  name      String
+  channelId String?  @unique @map("channel_id")
+  videos    Video[]
+  playlists Playlist[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("traders")
+}
+
+model Playlist {
+  id                String   @id @default(cuid())
+  youtubePlaylistId String   @unique @map("youtube_playlist_id")
+  traderId          String?  @map("trader_id")
+  trader            Trader?  @relation(fields: [traderId], references: [id])
+  title             String
+  youtubeUrl        String   @map("youtube_url")
+  videos            Video[]
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  @@map("playlists")
+}
+
+model Video {
+  id                 String           @id @default(cuid())
+  youtubeVideoId     String           @unique @map("youtube_video_id")
+  playlistId         String?          @map("playlist_id")
+  playlist           Playlist?        @relation(fields: [playlistId], references: [id])
+  traderId           String?          @map("trader_id")
+  trader             Trader?          @relation(fields: [traderId], references: [id])
+  title              String
+  description        String?
+  channelName        String?          @map("channel_name")
+  publishedAt        DateTime?        @map("published_at")
+  durationSeconds    Int?             @map("duration_seconds")
+  thumbnailUrl       String?          @map("thumbnail_url")
+  youtubeUrl         String           @map("youtube_url")
+  processingStatus   ProcessingStatus @default(QUEUED) @map("processing_status")
+  processingError    String?          @map("processing_error")
+  transcripts        TranscriptSegment[]
+  events             VideoEvent[]
+  frames             Frame[]
+  trades             Trade[]
+  jobs               VideoProcessingJob[]
+  analysisRuns       AnalysisRun[]
+  aiUsage            AiUsage[]
+  knowledgeChunks    KnowledgeChunk[]
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  @@index([processingStatus])
+  @@index([traderId, publishedAt])
+  @@map("videos")
+}
+
+model VideoProcessingJob {
+  id         String           @id @default(cuid())
+  videoId    String           @map("video_id")
+  video      Video            @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  queueName  String           @map("queue_name")
+  externalId String?          @map("external_id")
+  status     ProcessingStatus
+  progress   Int              @default(0)
+  attempts   Int              @default(0)
+  error      String?
+  startedAt  DateTime?        @map("started_at")
+  endedAt    DateTime?        @map("ended_at")
+  createdAt  DateTime         @default(now()) @map("created_at")
+  updatedAt  DateTime         @updatedAt @map("updated_at")
+  @@index([videoId, queueName])
+  @@map("video_processing_jobs")
+}
+
+model TranscriptSegment {
+  id           String   @id @default(cuid())
+  videoId      String   @map("video_id")
+  video        Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  startSeconds Float    @map("start_seconds")
+  endSeconds   Float    @map("end_seconds")
+  text         String
+  language     String?
+  confidence   Float?
+  speaker      String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  @@index([videoId, startSeconds])
+  @@map("transcript_segments")
+}
+
+model VideoEvent {
+  id               String   @id @default(cuid())
+  videoId          String   @map("video_id")
+  video            Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  timestampSeconds Float    @map("timestamp_seconds")
+  eventType        String   @map("event_type")
+  confidence       Float?
+  source           SourceType
+  description      String
+  createdAt        DateTime @default(now()) @map("created_at")
+  @@index([videoId, timestampSeconds])
+  @@index([eventType])
+  @@map("video_events")
+}
+
+model Frame {
+  id               String          @id @default(cuid())
+  videoId          String          @map("video_id")
+  video            Video           @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  timestampSeconds Float           @map("timestamp_seconds")
+  filePath         String?         @map("file_path")
+  storageUrl       String?         @map("storage_url")
+  frameHash        String?         @map("frame_hash")
+  analyses         FrameAnalysis[]
+  createdAt        DateTime        @default(now()) @map("created_at")
+  @@index([videoId, timestampSeconds])
+  @@map("frames")
+}
+
+model FrameAnalysis {
+  id                String   @id @default(cuid())
+  frameId           String   @map("frame_id")
+  frame             Frame    @relation(fields: [frameId], references: [id], onDelete: Cascade)
+  symbol            String?
+  timeframe         String?
+  visiblePrice      Decimal? @map("visible_price") @db.Decimal(18, 8)
+  chartElements     Json?    @map("chart_elements")
+  indicators        Json?
+  drawings          Json?
+  visualDescription String   @map("visual_description")
+  confidence        Float?
+  rawJson           Json?    @map("raw_json")
+  createdAt         DateTime @default(now()) @map("created_at")
+  @@map("frame_analysis")
+}
+
+model Trade {
+  id                       String                   @id @default(cuid())
+  videoId                  String                   @map("video_id")
+  video                    Video                    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  tradeNumber              Int                      @map("trade_number")
+  symbol                   String?
+  direction                TradeDirection?
+  entryPrice               Decimal?                 @map("entry_price") @db.Decimal(18, 8)
+  stopLoss                 Decimal?                 @map("stop_loss") @db.Decimal(18, 8)
+  takeProfit               Decimal?                 @map("take_profit") @db.Decimal(18, 8)
+  exitPrice                Decimal?                 @map("exit_price") @db.Decimal(18, 8)
+  entryTimestamp           Float?                   @map("entry_timestamp")
+  exitTimestamp            Float?                   @map("exit_timestamp")
+  result                   TradeResult              @default(UNKNOWN)
+  riskReward               Decimal?                 @map("risk_reward") @db.Decimal(10, 4)
+  setupName                String?                  @map("setup_name")
+  entryReason              String?                  @map("entry_reason")
+  exitReason               String?                  @map("exit_reason")
+  marketCondition          String?                  @map("market_condition")
+  timeframes               String[]
+  confidence               Float?
+  validationStatus         ValidationStatus         @default(PENDING) @map("validation_status")
+  profitVerificationStatus ProfitVerificationStatus @default(UNKNOWN) @map("profit_verification_status")
+  events                   TradeEvent[]
+  createdAt                DateTime                 @default(now()) @map("created_at")
+  updatedAt                DateTime                 @updatedAt @map("updated_at")
+  @@unique([videoId, tradeNumber])
+  @@index([symbol, direction])
+  @@index([setupName])
+  @@map("trades")
+}
+
+model TradeEvent {
+  id               String        @id @default(cuid())
+  tradeId          String        @map("trade_id")
+  trade            Trade         @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  eventType        String        @map("event_type")
+  timestampSeconds Float         @map("timestamp_seconds")
+  description      String
+  sourceType       SourceType    @map("source_type")
+  sourceReference  String?       @map("source_reference")
+  evidenceLevel    EvidenceLevel @default(UNKNOWN) @map("evidence_level")
+  confidence       Float?
+  createdAt        DateTime      @default(now()) @map("created_at")
+  @@index([tradeId, timestampSeconds])
+  @@map("trade_events")
+}
+
+model StrategyPattern {
+  id               String   @id @default(cuid())
+  name             String
+  description      String
+  conditions       Json
+  occurrences      Int      @default(0)
+  wins             Int      @default(0)
+  losses           Int      @default(0)
+  observedFrequency Float?   @map("observed_frequency")
+  confidence       Float?
+  sourceTradeCount Int      @default(0) @map("source_trade_count")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  @@map("strategy_patterns")
+}
+
+model KnowledgeChunk {
+  id          String   @id @default(cuid())
+  videoId     String?  @map("video_id")
+  video       Video?   @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  sourceType  String   @map("source_type")
+  sourceId    String?  @map("source_id")
+  content     String
+  metadata    Json?
+  embedding   Unsupported("vector")?
+  createdAt   DateTime @default(now()) @map("created_at")
+  @@index([videoId])
+  @@map("knowledge_chunks")
+}
+
+model AnalysisRun {
+  id            String   @id @default(cuid())
+  videoId       String?  @map("video_id")
+  video         Video?   @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  operation     String
+  model         String?
+  promptVersion String?  @map("prompt_version")
+  status        String
+  rawOutput     Json?    @map("raw_output")
+  error         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  @@index([videoId, operation])
+  @@map("analysis_runs")
+}
+
+model AiUsage {
+  id            String   @id @default(cuid())
+  videoId       String?  @map("video_id")
+  video         Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  model         String
+  operation     String
+  inputTokens   Int      @default(0) @map("input_tokens")
+  outputTokens  Int      @default(0) @map("output_tokens")
+  estimatedCost Decimal? @map("estimated_cost") @db.Decimal(14, 6)
+  createdAt     DateTime @default(now()) @map("created_at")
+  @@index([videoId, operation])
+  @@index([model])
+  @@map("ai_usage")
+}
