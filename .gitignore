@@ -7,6 +7,10 @@ node_modules
 .vercel
 .tools
 .deploy-keys
+.cloudpanel-cookies.txt
+cookies.txt
+yt-cookies.txt
+*.cookies.txt
 coverage
 storage/*
 !storage/.gitkeep
