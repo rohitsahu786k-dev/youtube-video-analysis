@@ -2,7 +2,7 @@
   "name": "forex-trader-video-intelligence",
   "version": "1.0.0",
   "private": true,
-  "engines": {"node": ">=22"},
+  "engines": {"node": "22.x"},
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/prisma-generate.mjs && next build",
