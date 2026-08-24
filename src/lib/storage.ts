@@ -35,12 +35,12 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   url(key: string) {
-    return `/api/storage/${encodeURIComponent(key)}`;
+    return `/api/storage/${key.split("/").map(encodeURIComponent).join("/")}`;
   }
 }
 
-export interface S3StorageProvider extends StorageProvider {}
-export interface SupabaseStorageProvider extends StorageProvider {}
+export type S3StorageProvider = StorageProvider;
+export type SupabaseStorageProvider = StorageProvider;
 
 export function storageProvider(): StorageProvider {
   return new LocalStorageProvider();
