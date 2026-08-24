@@ -21,7 +21,10 @@ jobs:
           find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .bootstrap -exec rm -rf {} +
           tar -xzf /tmp/fx-full.tar.gz -C .
           rm -rf .bootstrap
-          rm -f .github/workflows/bootstrap-source.yml
+          # Keep workflow files identical to main. The Actions GITHUB_TOKEN has
+          # contents:write but not the separate workflows permission required
+          # to create/update/delete workflow files.
+          git checkout origin/main -- .github
       - name: Commit restored application
         shell: bash
         run: |
