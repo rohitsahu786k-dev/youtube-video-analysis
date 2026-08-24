@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
@@ -53,7 +53,7 @@ enum ProfitVerification {
 }
 
 model User {
-  id          String   @id @default(cuid())
+  id          String   @id @default(cuid()) @map("_id")
   email       String?  @unique
   displayName String?
   createdAt   DateTime @default(now())
@@ -61,7 +61,7 @@ model User {
 }
 
 model Trader {
-  id             String            @id @default(cuid())
+  id             String            @id @default(cuid()) @map("_id")
   displayName    String
   channelName    String?
   videos         Video[]
@@ -73,7 +73,7 @@ model Trader {
 }
 
 model Playlist {
-  id                String   @id @default(cuid())
+  id                String   @id @default(cuid()) @map("_id")
   youtubePlaylistId String   @unique
   title             String
   description       String?
@@ -89,7 +89,7 @@ model Playlist {
 }
 
 model Video {
-  id                String               @id @default(cuid())
+  id                String               @id @default(cuid()) @map("_id")
   youtubeVideoId    String               @unique
   playlistId        String?
   playlist          Playlist?            @relation(fields: [playlistId], references: [id])
@@ -121,7 +121,7 @@ model Video {
 }
 
 model VideoProcessingJob {
-  id        String           @id @default(cuid())
+  id        String           @id @default(cuid()) @map("_id")
   videoId   String
   video     Video            @relation(fields: [videoId], references: [id], onDelete: Cascade)
   queueName String
@@ -137,7 +137,7 @@ model VideoProcessingJob {
 }
 
 model TranscriptSegment {
-  id           String   @id @default(cuid())
+  id           String   @id @default(cuid()) @map("_id")
   videoId      String
   video        Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
   startSeconds Float
@@ -152,7 +152,7 @@ model TranscriptSegment {
 }
 
 model VideoEvent {
-  id               String        @id @default(cuid())
+  id               String        @id @default(cuid()) @map("_id")
   videoId          String
   video            Video         @relation(fields: [videoId], references: [id], onDelete: Cascade)
   timestampSeconds Float
@@ -169,7 +169,7 @@ model VideoEvent {
 }
 
 model Frame {
-  id               String          @id @default(cuid())
+  id               String          @id @default(cuid()) @map("_id")
   videoId          String
   video            Video           @relation(fields: [videoId], references: [id], onDelete: Cascade)
   timestampSeconds Float
@@ -187,12 +187,12 @@ model Frame {
 }
 
 model FrameAnalysis {
-  id                String        @id @default(cuid())
+  id                String        @id @default(cuid()) @map("_id")
   frameId           String
   frame             Frame         @relation(fields: [frameId], references: [id], onDelete: Cascade)
   symbol            String?
   timeframe         String?
-  visiblePrice      Decimal?      @db.Decimal(18, 8)
+  visiblePrice      Float?
   chartElements     Json?
   indicators        Json?
   drawings          Json?
@@ -207,16 +207,16 @@ model FrameAnalysis {
 }
 
 model Trade {
-  id                    String             @id @default(cuid())
+  id                    String             @id @default(cuid()) @map("_id")
   videoId               String
   video                 Video              @relation(fields: [videoId], references: [id], onDelete: Cascade)
   tradeNumber           Int
   symbol                String?
   direction             String?
-  entryPrice            Decimal?           @db.Decimal(18, 8)
-  stopLoss              Decimal?           @db.Decimal(18, 8)
-  takeProfit            Decimal?           @db.Decimal(18, 8)
-  exitPrice             Decimal?           @db.Decimal(18, 8)
+  entryPrice            Float?
+  stopLoss              Float?
+  takeProfit            Float?
+  exitPrice             Float?
   entryTimestamp        Float?
   exitTimestamp         Float?
   result                String?
@@ -245,7 +245,7 @@ model Trade {
 }
 
 model TradeEvent {
-  id               String        @id @default(cuid())
+  id               String        @id @default(cuid()) @map("_id")
   tradeId          String
   trade            Trade         @relation(fields: [tradeId], references: [id], onDelete: Cascade)
   eventType        String
@@ -263,7 +263,7 @@ model TradeEvent {
 }
 
 model StrategyPattern {
-  id                String         @id @default(cuid())
+  id                String         @id @default(cuid()) @map("_id")
   traderId          String?
   trader            Trader?        @relation(fields: [traderId], references: [id])
   name              String
@@ -284,16 +284,17 @@ model StrategyPattern {
 }
 
 model PatternTrade {
+  id        String          @id @default(cuid()) @map("_id")
   patternId String
   tradeId   String
   pattern   StrategyPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
   trade     Trade           @relation(fields: [tradeId], references: [id], onDelete: Cascade)
 
-  @@id([patternId, tradeId])
+  @@unique([patternId, tradeId])
 }
 
 model KnowledgeChunk {
-  id         String     @id @default(cuid())
+  id         String     @id @default(cuid()) @map("_id")
   videoId    String?
   video      Video?     @relation(fields: [videoId], references: [id], onDelete: Cascade)
   sourceType String
@@ -309,19 +310,19 @@ model KnowledgeChunk {
 }
 
 model Embedding {
-  id               String   @id @default(cuid())
+  id               String   @id @default(cuid()) @map("_id")
   knowledgeChunkId String   @unique
   knowledgeChunk   KnowledgeChunk @relation(fields: [knowledgeChunkId], references: [id], onDelete: Cascade)
   model            String
   dimensions       Int      @default(1536)
-  vector           Unsupported("vector(1536)")
+  vector           Json
   createdAt        DateTime @default(now())
 
   @@index([model])
 }
 
 model AiUsage {
-  id            String   @id @default(cuid())
+  id            String   @id @default(cuid()) @map("_id")
   videoId       String?
   video         Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
   operation     String
@@ -329,7 +330,7 @@ model AiUsage {
   inputTokens   Int      @default(0)
   outputTokens  Int      @default(0)
   cachedTokens  Int      @default(0)
-  estimatedCost Decimal  @db.Decimal(12, 6)
+  estimatedCost Float
   createdAt     DateTime @default(now())
 
   @@index([videoId])
@@ -337,7 +338,7 @@ model AiUsage {
 }
 
 model AnalysisRun {
-  id            String   @id @default(cuid())
+  id            String   @id @default(cuid()) @map("_id")
   videoId       String?
   video         Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
   operation     String
@@ -354,7 +355,7 @@ model AnalysisRun {
 }
 
 model Contradiction {
-  id            String        @id @default(cuid())
+  id            String        @id @default(cuid()) @map("_id")
   traderId      String?
   trader        Trader?       @relation(fields: [traderId], references: [id], onDelete: SetNull)
   statementA    String
