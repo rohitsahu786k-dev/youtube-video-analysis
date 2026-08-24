@@ -1,24 +1,371 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+generator client {
+  provider = "prisma-client-js"
+}
 
-enum ProcessingStatus { QUEUED DOWNLOADING EXTRACTING_AUDIO TRANSCRIBING DETECTING_EVENTS EXTRACTING_FRAMES ANALYZING_VISUALS EXTRACTING_TRADES VALIDATING INDEXING COMPLETED FAILED PAUSED CANCELLED }
-enum EvidenceLevel { DIRECT STRONG_INFERENCE WEAK_INFERENCE UNKNOWN }
-enum SourceType { TRANSCRIPT VISUAL AI_INFERENCE SYSTEM }
-enum ValidationStatus { VALID INVALID UNCERTAIN PENDING }
-enum ProfitVerification { UNVERIFIED VISUALLY_SUPPORTED CALCULATED UNKNOWN }
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
-model Trader { id String @id @default(cuid()) displayName String channelName String? videos Video[] playlists Playlist[] patterns StrategyPattern[] createdAt DateTime @default(now()) updatedAt DateTime @updatedAt }
-model Playlist { id String @id @default(cuid()) youtubePlaylistId String @unique title String description String? youtubeUrl String channelName String? traderId String? trader Trader? @relation(fields:[traderId],references:[id]) videos Video[] createdAt DateTime @default(now()) updatedAt DateTime @updatedAt }
-model Video { id String @id @default(cuid()) youtubeVideoId String @unique playlistId String? playlist Playlist? @relation(fields:[playlistId],references:[id]) traderId String? trader Trader? @relation(fields:[traderId],references:[id]) title String description String? channelName String? publishedAt DateTime? durationSeconds Int? thumbnailUrl String? youtubeUrl String processingStatus ProcessingStatus @default(QUEUED) processingError String? transcripts TranscriptSegment[] events VideoEvent[] frames Frame[] trades Trade[] jobs VideoProcessingJob[] chunks KnowledgeChunk[] usages AiUsage[] createdAt DateTime @default(now()) updatedAt DateTime @updatedAt @@index([processingStatus]) }
-model VideoProcessingJob { id String @id @default(cuid()) videoId String video Video @relation(fields:[videoId],references:[id],onDelete:Cascade) queueName String status ProcessingStatus progress Int @default(0) attempt Int @default(0) error String? createdAt DateTime @default(now()) updatedAt DateTime @updatedAt }
-model TranscriptSegment { id String @id @default(cuid()) videoId String video Video @relation(fields:[videoId],references:[id],onDelete:Cascade) startSeconds Float endSeconds Float text String speaker String? language String? confidence Float? createdAt DateTime @default(now()) @@index([videoId,startSeconds]) }
-model VideoEvent { id String @id @default(cuid()) videoId String video Video @relation(fields:[videoId],references:[id],onDelete:Cascade) timestampSeconds Float eventType String confidence Float source SourceType evidenceLevel EvidenceLevel description String transcriptText String? createdAt DateTime @default(now()) @@index([videoId,timestampSeconds]) }
-model Frame { id String @id @default(cuid()) videoId String video Video @relation(fields:[videoId],references:[id],onDelete:Cascade) timestampSeconds Float filePath String? storageUrl String? frameHash String? perceptualHash String? isEvidence Boolean @default(false) analyses FrameAnalysis[] createdAt DateTime @default(now()) @@index([videoId,timestampSeconds]) }
-model FrameAnalysis { id String @id @default(cuid()) frameId String frame Frame @relation(fields:[frameId],references:[id],onDelete:Cascade) symbol String? timeframe String? visiblePrice Decimal? @db.Decimal(18,8) chartElements Json? indicators Json? drawings Json? visualDescription String confidence Float evidenceLevel EvidenceLevel rawJson Json? createdAt DateTime @default(now()) }
-model Trade { id String @id @default(cuid()) videoId String video Video @relation(fields:[videoId],references:[id],onDelete:Cascade) tradeNumber Int symbol String? direction String? entryPrice Decimal? @db.Decimal(18,8) stopLoss Decimal? @db.Decimal(18,8) takeProfit Decimal? @db.Decimal(18,8) exitPrice Decimal? @db.Decimal(18,8) entryTimestamp Float? exitTimestamp Float? result String? riskReward Float? setupName String? entryReason String? exitReason String? marketCondition String? timeframes Json? indicators Json? management Json? confidence Float validationStatus ValidationStatus @default(PENDING) validationReason String? spokenProfitClaim String? profitVerification ProfitVerification @default(UNKNOWN) events TradeEvent[] patternLinks PatternTrade[] createdAt DateTime @default(now()) updatedAt DateTime @updatedAt @@unique([videoId,tradeNumber]) @@index([symbol]) @@index([setupName]) }
-model TradeEvent { id String @id @default(cuid()) tradeId String trade Trade @relation(fields:[tradeId],references:[id],onDelete:Cascade) eventType String timestampSeconds Float description String sourceType SourceType sourceReference String? evidenceLevel EvidenceLevel confidence Float evidencePayload Json? createdAt DateTime @default(now()) @@index([tradeId,timestampSeconds]) }
-model StrategyPattern { id String @id @default(cuid()) traderId String? trader Trader? @relation(fields:[traderId],references:[id]) name String description String conditions Json occurrences Int @default(0) wins Int @default(0) losses Int @default(0) observedFrequency Float? averageR Float? confidence Float sourceTradeCount Int @default(0) tradeLinks PatternTrade[] createdAt DateTime @default(now()) updatedAt DateTime @updatedAt }
-model PatternTrade { patternId String tradeId String pattern StrategyPattern @relation(fields:[patternId],references:[id],onDelete:Cascade) trade Trade @relation(fields:[tradeId],references:[id],onDelete:Cascade) @@id([patternId,tradeId]) }
-model KnowledgeChunk { id String @id @default(cuid()) videoId String? video Video? @relation(fields:[videoId],references:[id],onDelete:Cascade) sourceType String sourceId String? title String? content String metadata Json? embedding Unsupported("vector(1536)")? createdAt DateTime @default(now()) @@index([videoId]) }
-model AiUsage { id String @id @default(cuid()) videoId String? video Video? @relation(fields:[videoId],references:[id],onDelete:SetNull) operation String model String inputTokens Int @default(0) outputTokens Int @default(0) cachedTokens Int @default(0) estimatedCost Decimal @db.Decimal(12,6) createdAt DateTime @default(now()) }
-model Contradiction { id String @id @default(cuid()) traderId String? statementA String statementB String sourceA Json sourceB Json evidenceLevel EvidenceLevel confidence Float status String @default("POTENTIAL") createdAt DateTime @default(now()) }
+enum ProcessingStatus {
+  QUEUED
+  DOWNLOADING
+  EXTRACTING_AUDIO
+  TRANSCRIBING
+  DETECTING_EVENTS
+  EXTRACTING_FRAMES
+  ANALYZING_VISUALS
+  EXTRACTING_TRADES
+  VALIDATING
+  INDEXING
+  COMPLETED
+  FAILED
+  PAUSED
+  CANCELLED
+}
+
+enum EvidenceLevel {
+  DIRECT
+  STRONG_INFERENCE
+  WEAK_INFERENCE
+  UNKNOWN
+}
+
+enum SourceType {
+  TRANSCRIPT
+  VISUAL
+  AI_INFERENCE
+  SYSTEM
+}
+
+enum ValidationStatus {
+  VALID
+  INVALID
+  UNCERTAIN
+  PENDING
+}
+
+enum ProfitVerification {
+  UNVERIFIED
+  VISUALLY_SUPPORTED
+  CALCULATED
+  UNKNOWN
+}
+
+model User {
+  id          String   @id @default(cuid())
+  email       String?  @unique
+  displayName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Trader {
+  id             String            @id @default(cuid())
+  displayName    String
+  channelName    String?
+  videos         Video[]
+  playlists      Playlist[]
+  patterns       StrategyPattern[]
+  contradictions Contradiction[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+}
+
+model Playlist {
+  id                String   @id @default(cuid())
+  youtubePlaylistId String   @unique
+  title             String
+  description       String?
+  youtubeUrl        String
+  channelName       String?
+  traderId          String?
+  trader            Trader?  @relation(fields: [traderId], references: [id])
+  videos            Video[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([traderId])
+}
+
+model Video {
+  id                String               @id @default(cuid())
+  youtubeVideoId    String               @unique
+  playlistId        String?
+  playlist          Playlist?            @relation(fields: [playlistId], references: [id])
+  traderId          String?
+  trader            Trader?              @relation(fields: [traderId], references: [id])
+  title             String
+  description       String?
+  channelName       String?
+  publishedAt       DateTime?
+  durationSeconds   Int?
+  thumbnailUrl      String?
+  youtubeUrl        String
+  processingStatus  ProcessingStatus     @default(QUEUED)
+  processingError   String?
+  transcripts       TranscriptSegment[]
+  events            VideoEvent[]
+  frames            Frame[]
+  trades            Trade[]
+  jobs              VideoProcessingJob[]
+  chunks            KnowledgeChunk[]
+  usages            AiUsage[]
+  analysisRuns      AnalysisRun[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([playlistId])
+  @@index([traderId])
+  @@index([processingStatus])
+}
+
+model VideoProcessingJob {
+  id        String           @id @default(cuid())
+  videoId   String
+  video     Video            @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  queueName String
+  status    ProcessingStatus
+  progress  Int              @default(0)
+  attempt   Int              @default(0)
+  error     String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([videoId])
+  @@index([queueName, status])
+}
+
+model TranscriptSegment {
+  id           String   @id @default(cuid())
+  videoId      String
+  video        Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  startSeconds Float
+  endSeconds   Float
+  text         String
+  speaker      String?
+  language     String?
+  confidence   Float?
+  createdAt    DateTime @default(now())
+
+  @@index([videoId, startSeconds])
+}
+
+model VideoEvent {
+  id               String        @id @default(cuid())
+  videoId          String
+  video            Video         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  timestampSeconds Float
+  eventType        String
+  confidence       Float
+  source           SourceType
+  evidenceLevel    EvidenceLevel
+  description      String
+  transcriptText   String?
+  createdAt        DateTime      @default(now())
+
+  @@index([videoId, timestampSeconds])
+  @@index([videoId, eventType])
+}
+
+model Frame {
+  id               String          @id @default(cuid())
+  videoId          String
+  video            Video           @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  timestampSeconds Float
+  filePath         String?
+  storageUrl       String?
+  frameHash        String?
+  perceptualHash   String?
+  isEvidence       Boolean         @default(false)
+  analyses         FrameAnalysis[]
+  createdAt        DateTime        @default(now())
+
+  @@index([videoId, timestampSeconds])
+  @@index([frameHash])
+  @@index([perceptualHash])
+}
+
+model FrameAnalysis {
+  id                String        @id @default(cuid())
+  frameId           String
+  frame             Frame         @relation(fields: [frameId], references: [id], onDelete: Cascade)
+  symbol            String?
+  timeframe         String?
+  visiblePrice      Decimal?      @db.Decimal(18, 8)
+  chartElements     Json?
+  indicators        Json?
+  drawings          Json?
+  visualDescription String
+  confidence        Float
+  evidenceLevel     EvidenceLevel
+  rawJson           Json?
+  createdAt         DateTime      @default(now())
+
+  @@index([frameId])
+  @@index([symbol, timeframe])
+}
+
+model Trade {
+  id                    String             @id @default(cuid())
+  videoId               String
+  video                 Video              @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  tradeNumber           Int
+  symbol                String?
+  direction             String?
+  entryPrice            Decimal?           @db.Decimal(18, 8)
+  stopLoss              Decimal?           @db.Decimal(18, 8)
+  takeProfit            Decimal?           @db.Decimal(18, 8)
+  exitPrice             Decimal?           @db.Decimal(18, 8)
+  entryTimestamp        Float?
+  exitTimestamp         Float?
+  result                String?
+  riskReward            Float?
+  setupName             String?
+  entryReason           String?
+  exitReason            String?
+  marketCondition       String?
+  timeframes            Json?
+  indicators            Json?
+  management            Json?
+  confidence            Float
+  validationStatus      ValidationStatus   @default(PENDING)
+  validationReason      String?
+  spokenProfitClaim     String?
+  profitVerification    ProfitVerification @default(UNKNOWN)
+  events                TradeEvent[]
+  patternLinks          PatternTrade[]
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  @@unique([videoId, tradeNumber])
+  @@index([symbol])
+  @@index([setupName])
+  @@index([validationStatus])
+}
+
+model TradeEvent {
+  id               String        @id @default(cuid())
+  tradeId          String
+  trade            Trade         @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  eventType        String
+  timestampSeconds Float
+  description      String
+  sourceType       SourceType
+  sourceReference  String?
+  evidenceLevel    EvidenceLevel
+  confidence       Float
+  evidencePayload  Json?
+  createdAt        DateTime      @default(now())
+
+  @@index([tradeId, timestampSeconds])
+  @@index([eventType])
+}
+
+model StrategyPattern {
+  id                String         @id @default(cuid())
+  traderId          String?
+  trader            Trader?        @relation(fields: [traderId], references: [id])
+  name              String
+  description       String
+  conditions        Json
+  occurrences       Int            @default(0)
+  wins              Int            @default(0)
+  losses            Int            @default(0)
+  observedFrequency Float?
+  averageR          Float?
+  confidence        Float
+  sourceTradeCount  Int            @default(0)
+  tradeLinks        PatternTrade[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([traderId])
+}
+
+model PatternTrade {
+  patternId String
+  tradeId   String
+  pattern   StrategyPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+  trade     Trade           @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@id([patternId, tradeId])
+}
+
+model KnowledgeChunk {
+  id         String     @id @default(cuid())
+  videoId    String?
+  video      Video?     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  sourceType String
+  sourceId   String?
+  title      String?
+  content    String
+  metadata   Json?
+  embedding  Embedding?
+  createdAt  DateTime   @default(now())
+
+  @@index([videoId])
+  @@index([sourceType])
+}
+
+model Embedding {
+  id               String   @id @default(cuid())
+  knowledgeChunkId String   @unique
+  knowledgeChunk   KnowledgeChunk @relation(fields: [knowledgeChunkId], references: [id], onDelete: Cascade)
+  model            String
+  dimensions       Int      @default(1536)
+  vector           Unsupported("vector(1536)")
+  createdAt        DateTime @default(now())
+
+  @@index([model])
+}
+
+model AiUsage {
+  id            String   @id @default(cuid())
+  videoId       String?
+  video         Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  operation     String
+  model         String
+  inputTokens   Int      @default(0)
+  outputTokens  Int      @default(0)
+  cachedTokens  Int      @default(0)
+  estimatedCost Decimal  @db.Decimal(12, 6)
+  createdAt     DateTime @default(now())
+
+  @@index([videoId])
+  @@index([model, operation])
+}
+
+model AnalysisRun {
+  id            String   @id @default(cuid())
+  videoId       String?
+  video         Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  operation     String
+  promptVersion String?
+  model         String?
+  status        String
+  rawOutput     Json?
+  error         String?
+  startedAt     DateTime @default(now())
+  completedAt   DateTime?
+
+  @@index([videoId])
+  @@index([operation, status])
+}
+
+model Contradiction {
+  id            String        @id @default(cuid())
+  traderId      String?
+  trader        Trader?       @relation(fields: [traderId], references: [id], onDelete: SetNull)
+  statementA    String
+  statementB    String
+  sourceA       Json
+  sourceB       Json
+  evidenceLevel EvidenceLevel
+  confidence    Float
+  status        String        @default("POTENTIAL")
+  createdAt     DateTime      @default(now())
+
+  @@index([traderId])
+  @@index([status])
+}
