@@ -8,6 +8,13 @@ YouTube video/playlist ingestion; BullMQ/Redis background pipeline; FFmpeg + yt-
 ## Preview
 `MOCK_AI_MODE=true` runs the complete UI without paid external services. Real processing requires OpenAI, YouTube Data API, MongoDB Atlas, Redis and a long-running worker with FFmpeg + yt-dlp.
 
+## Vercel Hosting
+Import this GitHub repository in Vercel and keep the root directory as `/`. Vercel should use `npm install` and `npm run build` from `vercel.json`.
+
+Set required secrets in Vercel Project Settings, not in committed files: `DATABASE_URL`, `OPENAI_API_KEY`, `YOUTUBE_API_KEY`, `CLOUDINARY_URL`, and optionally `REDIS_URL`.
+
+For a web-only hosted preview, set `MOCK_AI_MODE=true`. For real processing, keep the Next.js web/API on Vercel and run the BullMQ worker from `Dockerfile.worker` on a long-running host with FFmpeg and yt-dlp.
+
 ## Commands
 ```bash
 cp .env.example .env
