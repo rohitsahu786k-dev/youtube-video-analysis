@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-function loadLocalEnv(){const file=path.resolve(process.cwd(),".env");if(!existsSync(file))return;for(const raw of readFileSync(file,"utf8").replace(/^\uFEFF/,"").split(/\r?\n/)){const line=raw.trim();if(!line||line.startsWith("#"))continue;const i=line.indexOf("=");if(i<1)continue;const key=line.slice(0,i).trim();let value=line.slice(i+1).trim();if((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))value=value.slice(1,-1);if(process.env[key]===undefined)process.env[key]=value;}}
+function loadLocalEnv(){const file=path.resolve(process.cwd(),".env");if(!existsSync(file))return;for(const raw of readFileSync(file,"utf8").replace(/^\uFEFF/,"").split(/\r?\n/)){const line=raw.trim();if(!line||line.startsWith("#"))continue;const i=line.indexOf("=");if(i<1)continue;const key=line.slice(0,i).trim();let value=line.slice(i+1).trim();if((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'")))value=value.slice(1,-1);process.env[key]=value;}}
 loadLocalEnv();
 const emptyToUndefined=(v:unknown)=>v===""?undefined:v;
 const bool=z.preprocess(v=>emptyToUndefined(v)===undefined?undefined:v===true||v==="true",z.boolean());
