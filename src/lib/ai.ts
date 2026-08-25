@@ -103,12 +103,18 @@ export async function transcribe(audioPath: string) {
   const result = response as unknown as {
     text?: string;
     language?: string;
+    duration?: number;
     segments?: Array<{ start?: number; end?: number; text?: string }>;
   };
+  const directSegments = (result.segments ?? []).filter((segment) => segment.text?.trim());
+  const fallbackSegments = directSegments.length
+    ? directSegments
+    : chunkTranscript(result.text ?? "", result.duration);
+  if (!fallbackSegments.length) throw new Error("Transcription returned no text or timestamp segments");
   return {
     text: result.text ?? "",
     language: result.language ?? null,
-    segments: (result.segments ?? []).map((segment) => ({
+    segments: fallbackSegments.map((segment) => ({
       start: segment.start ?? 0,
       end: segment.end ?? segment.start ?? 0,
       text: segment.text ?? "",
@@ -116,6 +122,24 @@ export async function transcribe(audioPath: string) {
       confidence: null,
     })),
   };
+}
+
+function chunkTranscript(text: string, duration?: number) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const chunkSize = 80;
+  const chunks: Array<{ start: number; end: number; text: string }> = [];
+  const estimatedDuration = duration && duration > 0 ? duration : Math.max(30, Math.ceil(words.length / 150) * 60);
+  const secondsPerWord = estimatedDuration / words.length;
+  for (let i = 0; i < words.length; i += chunkSize) {
+    const part = words.slice(i, i + chunkSize);
+    chunks.push({
+      start: Math.round(i * secondsPerWord * 10) / 10,
+      end: Math.round(Math.min(words.length, i + part.length) * secondsPerWord * 10) / 10,
+      text: part.join(" "),
+    });
+  }
+  return chunks;
 }
 
 export async function analyzeFrames(paths: string[], context: string) {
