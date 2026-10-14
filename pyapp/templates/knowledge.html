@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Knowledge Base | Forex Trader Video Intelligence{% endblock %}
+{% block page_title %}Knowledge Base Chunks{% endblock %}
+{% block page_subtitle %}Indexed video segments, visual observations, and trade evidence chunks for RAG grounding{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-title">
+    <span>Showing {{ knowledge|length }} / {{ total_chunks }} Knowledge Chunks</span>
+  </div>
+  <form action="/knowledge" method="get" class="chart-controls" style="margin-bottom: 1rem"><label for="knowledge-query">Search evidence<input id="knowledge-query" name="q" value="{{ q }}" placeholder="liquidity, stop, breakeven…"></label><button class="btn btn-secondary">Search</button></form>
+
+  <div style="display: flex; flex-direction: column; gap: 1rem;">
+    {% for k in knowledge %}
+    <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; box-shadow: var(--shadow-sm);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+        <span class="badge {% if k.type == 'Trade' %}badge-long{% elif k.type == 'Visual' %}badge-valid{% else %}badge-uncertain{% endif %}">
+          {{ k.type }} Chunk
+        </span>
+        <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500;">Timestamp: {{ (k.time // 60)|int }}:{{ "%02d"|format((k.time % 60)|int) }}</span>
+      </div>
+      <h3 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.35rem;">{{ k.title }}</h3>
+      <div style="font-size: 0.75rem; color: var(--accent-blue); font-weight: 600; margin-bottom: 0.5rem;">Video: {{ k.video }}</div>
+      <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5;">
+        {{ k.content }}
+      </p>
+      <a href="{{ k.sourceUrl }}" target="_blank" rel="noopener">View timestamped source</a> · <a href="/videos/{{ k.videoId }}">Captured evidence</a>
+    </div>
+    {% else %}<p class="chart-note">No analyzed evidence yet. Add a YouTube playlist to build the knowledge base.</p>{% endfor %}
+  </div>
+</div>
+{% endblock %}

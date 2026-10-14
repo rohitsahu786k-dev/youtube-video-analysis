@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}TradingView Charts | Trader Intelligence{% endblock %}
+{% block page_title %}TradingView Charts{% endblock %}
+{% block page_subtitle %}Explore price action, indicators and drawing tools{% endblock %}
+
+{% block content %}
+<div class="card" id="live-analysis" data-symbol="{{ symbol }}" data-interval="{{ interval }}">
+  <div class="card-title">Paper analysis · {{ symbol }} · {{ interval }} timeframe <button id="refresh-signals" class="btn btn-secondary" type="button">Check now</button></div>
+  <p id="signal-status" role="status">Checking strategy readiness…</p>
+  <div id="signal-results"></div>
+  <p class="chart-note">Analysis uses this platform's symbol/timeframe controls. TradingView toolbar changes affect the chart only. Signals use completed OANDA candles and fresh executable quotes; chart feed prices can differ. No order is submitted. <a href="/backtesting">Review rules and backtests</a></p>
+</div>
+<div class="card">
+  <form action="/charts" method="get" class="chart-controls">
+    <label for="chart-symbol">Symbol
+      <input id="chart-symbol" name="symbol" value="{{ symbol }}" required maxlength="64"
+             pattern="[A-Za-z0-9_:.!/\-]+" placeholder="FX:EURUSD" aria-describedby="symbol-help">
+    </label>
+    <label for="chart-interval">Timeframe
+      <select id="chart-interval" name="interval">
+        {% for value, label in [('1', '1 minute'), ('5', '5 minutes'), ('15', '15 minutes'), ('30', '30 minutes'), ('60', '1 hour'), ('240', '4 hours'), ('D', 'Daily'), ('W', 'Weekly'), ('M', 'Monthly')] %}
+        <option value="{{ value }}" {% if interval == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label for="chart-theme">Appearance
+      <select id="chart-theme" name="theme">
+        <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
+        <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
+      </select>
+    </label>
+    <button class="btn btn-primary" type="submit">Load chart</button>
+    <a class="btn btn-secondary" href="https://www.tradingview.com/chart/?symbol={{ symbol|urlencode }}&amp;interval={{ interval }}" target="_blank" rel="noopener noreferrer">Open in TradingView</a>
+  </form>
+  <p class="chart-note" id="symbol-help">Use an exchange prefix for other markets, for example NASDAQ:AAPL or BINANCE:BTCUSDT. Forex pairs also accept EURUSD or EUR/USD.</p>
+  <div class="chart-shortcuts" aria-label="Popular pairs">
+    {% for pair in ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'] %}
+    <a class="btn btn-secondary" href="/charts?symbol=FX:{{ pair }}&amp;interval={{ interval }}&amp;theme={{ theme }}">{{ pair }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card chart-card">
+  <div id="tradingview-chart" class="tradingview-widget-container">
+    <div class="tradingview-widget-container__widget"></div>
+    <div class="tradingview-widget-copyright">
+      <a href="https://www.tradingview.com/" rel="noopener noreferrer" target="_blank">Track all markets on TradingView</a>
+    </div>
+  </div>
+  <p id="chart-error" class="chart-note" role="status" hidden>TradingView could not load. Check your connection or content blocker, reload this page, or use Open in TradingView above.</p>
+  <noscript><p class="chart-note">Enable JavaScript to display the chart, or use Open in TradingView above.</p></noscript>
+</div>
+<p class="chart-note">Charts are supplied by TradingView; data availability and delays vary by market. This chart shows market prices, not the historical execution evidence extracted from your videos. To access personal saved layouts, use Open in TradingView and sign in there.</p>
+{% endblock %}
+
+{% block scripts %}
+<script id="tradingview-config" type="application/json">{{ chart_config|tojson }}</script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/signals.js"></script>
+{% endblock %}

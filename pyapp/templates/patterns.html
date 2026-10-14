@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Strategy Patterns | Forex Trader Video Intelligence{% endblock %}
+{% block page_title %}Recurring Strategy Patterns{% endblock %}
+{% block page_subtitle %}Clusters of setups identified across multiple live trading sessions{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-title">
+    <span>Catalog of Observed Patterns</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1.5rem;">
+    {% for p in patterns %}
+    <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; display: flex; flex-direction: column; box-shadow: var(--shadow-sm);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+        <h3 style="font-size: 1rem; font-weight: 700; color: var(--text-main);">{{ p.name }}</h3>
+        <span class="badge badge-valid">{{ p.kind }}</span>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1.25rem; flex: 1;">
+        {{ p.description }}
+      </p>
+
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; background: #f8fafc; border: 1px solid var(--border); padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; text-align: center;">
+        <div>
+          <div style="font-size: 0.68rem; color: var(--text-muted);">Occurrences</div>
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-main);">{{ p.occurrences }}</div>
+        </div>
+        <div>
+          <div style="font-size: 0.68rem; color: var(--text-muted);">Known execution win rate</div>
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--accent-green);">
+            {{ (p.winRate|string + '%') if p.winRate is not none else 'Unknown' }}
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 0.68rem; color: var(--text-muted);">Avg R:R</div>
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--accent-blue);">{{ p.avgR if p.avgR is not none else 'Unknown' }}</div>
+        </div>
+      </div>
+
+      <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+        <span>{{ p.status }} · {{ p.videos }} videos · {{ p.completed }} known outcomes {% if p.kind == 'EXECUTION' %}· {{ p.executionMode }}{% endif %}</span>
+        <span>Evidence: <a href="{{ '/knowledge' if p.kind == 'TEACHING' else '/trades' }}" style="color: var(--accent-blue); font-weight: 600;">{{ p.example }}</a></span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

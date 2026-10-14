@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Extracted Trades | Forex Trader Video Intelligence{% endblock %}
+{% block page_title %}Extracted Trades{% endblock %}
+{% block page_subtitle %}Forex positions visually identified and parsed by Gemini multimodal AI{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-title">
+    <span>Trades Repository ({{ trades|length }})</span>
+    <div style="display: flex; gap: 0.5rem;">
+      <select id="symbolFilter" onchange="filterTrades()" style="background: #ffffff; border: 1px solid var(--border); color: var(--text-main); padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.8rem; outline: none;">
+        <option value="">All Pairs</option>
+        <option value="EURUSD">EURUSD</option>
+        <option value="GBPUSD">GBPUSD</option>
+        <option value="XAUUSD">XAUUSD (Gold)</option>
+      </select>
+      <select id="outcomeFilter" onchange="filterTrades()" style="background: #ffffff; border: 1px solid var(--border); color: var(--text-main); padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.8rem; outline: none;">
+        <option value="">All Outcomes</option>
+        <option value="WIN">WIN</option>
+        <option value="LOSS">LOSS</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table id="tradesTable">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Symbol</th>
+          <th>Type</th>
+          <th>Entry</th>
+          <th>Stop Loss</th>
+          <th>Take Profit</th>
+          <th>Exit</th>
+          <th>R:R</th>
+          <th>Result</th>
+          <th>Setup</th>
+          <th>Validation</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in trades %}
+        <tr class="trade-row" data-symbol="{{ t.symbol }}" data-outcome="{{ t.result }}">
+          <td><code style="font-size: 0.75rem;">{{ t.id }}</code></td>
+          <td><a href="/charts?symbol={{ (t.symbol or 'EURUSD')|urlencode }}" title="View market chart"><strong>{{ t.symbol }}</strong></a></td>
+          <td>
+            <span class="badge {% if t.direction == 'LONG' %}badge-long{% else %}badge-short{% endif %}">
+              {{ t.direction }}
+            </span>
+          </td>
+          <td><code>{{ t.entry or 'N/A' }}</code></td>
+          <td><code style="color: #ef4444;">{{ t.sl or '-' }}</code></td>
+          <td><code style="color: #10b981;">{{ t.tp or '-' }}</code></td>
+          <td><code>{{ t.exit or '-' }}</code></td>
+          <td><strong>{{ t.rr if t.rr is not none else 'Unknown' }}{% if t.rr is not none %}R{% endif %}</strong></td>
+          <td>
+            <span class="badge {% if t.result == 'WIN' %}badge-win{% elif t.result == 'LOSS' %}badge-loss{% else %}badge-uncertain{% endif %}">
+              {{ t.result }}
+            </span>
+          </td>
+          <td style="color: var(--text-muted); font-size: 0.8rem;">{{ t.setup }}</td>
+          <td>
+            <span class="badge {% if t.validation == 'VALID' %}badge-valid{% else %}badge-uncertain{% endif %}">
+              {{ t.validation }}
+            </span>
+            <p class="chart-note">{{ t.executionMode|default('UNKNOWN') }} environment</p>
+            <details><summary>Evidence</summary><p class="chart-note">{{ t.validationReason }}</p>
+              <a href="/videos/{{ t.videoId }}">Video & captured frames</a> · <a href="{{ t.sourceUrl }}" target="_blank" rel="noopener">YouTube timestamp</a>
+              <p class="chart-note">{{ t.executionEvidence or 'Execution uncertain' }}</p>
+              {% for field, proof in (t.fieldEvidence or {}).items() if proof %}<p class="chart-note"><strong>{{ field }}:</strong> {{ proof }}</p>{% endfor %}
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterTrades() {
+  const sym = document.getElementById("symbolFilter").value.toUpperCase();
+  const out = document.getElementById("outcomeFilter").value.toUpperCase();
+  const rows = document.querySelectorAll(".trade-row");
+  rows.forEach(r => {
+    const rSym = (r.getAttribute("data-symbol") || "").toUpperCase();
+    const rOut = r.getAttribute("data-outcome").toUpperCase();
+    const matchSym = !sym || rSym === sym;
+    const matchOut = !out || rOut === out;
+    r.style.display = matchSym && matchOut ? "" : "none";
+  });
+}
+</script>
+{% endblock %}

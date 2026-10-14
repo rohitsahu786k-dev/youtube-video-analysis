@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Processing Pipeline | Forex Trader Video Intelligence{% endblock %}
+{% block page_title %}Processing Pipeline{% endblock %}
+{% block page_subtitle %}Live background worker progress, stage monitors, and queue management{% endblock %}
+
+{% block content %}
+<div class="card"><div class="card-title">Playlist / video discovery</div>
+{% for j in ingestions %}<div style="margin-bottom: 1rem"><strong>{{ j.status }}</strong><p class="chart-note">{{ j.url }}</p>
+{% if j.error %}<p class="chart-note">{{ j.error }}</p><button class="btn btn-secondary" data-retry-url="/api/ingestions/{{ j.id }}/retry">Retry discovery</button>{% endif %}
+{% if j.queuedCount is defined %}<p class="chart-note">{{ j.queuedCount }} new videos queued · {{ j.videoCount }} playlist entries</p>{% endif %}
+</div>{% else %}<p class="chart-note">No ingestions yet. Add a YouTube playlist.</p>{% endfor %}</div>
+<div class="card">
+  <div class="card-title">
+    <span>Pipeline Jobs ({{ jobs|length }})</span>
+    <button class="btn btn-secondary" onclick="window.location.reload()">Refresh Status</button>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 1rem;">
+    {% for j in jobs %}
+    <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; box-shadow: var(--shadow-sm);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+        <h3 style="font-size: 0.95rem; font-weight: 600; color: var(--text-main);">{{ j.video }}</h3>
+        <span class="badge {% if j.status == 'COMPLETED' %}badge-valid{% elif j.status == 'QUEUED' %}badge-uncertain{% else %}badge-long{% endif %}">
+          {{ j.status }}
+        </span>
+      </div>
+
+      <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+        Current Stage: <strong style="color: var(--accent-blue);">{{ j.stage }}</strong> &bull; Elapsed: {{ j.duration }}
+      </div>
+
+      <!-- Progress Bar -->
+      <div style="width: 100%; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden;">
+        <div style="width: {{ j.progress }}%; height: 100%; background: linear-gradient(90deg, #38bdf8, #2563eb); border-radius: 4px; transition: width 0.3s ease;"></div>
+      </div>
+      <div style="text-align: right; font-size: 0.72rem; color: var(--text-muted); margin-top: 0.35rem; font-weight: 600;">{{ j.progress }}% Complete</div>
+      <a href="/videos/{{ j.id }}">View evidence</a>
+      {% if j.error %}<p class="chart-note">{{ j.error }}</p><button class="btn btn-secondary" data-retry-url="/api/videos/{{ j.id }}/retry">Retry analysis</button>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script>setTimeout(() => { if (!document.hidden) window.location.reload(); }, 15000);</script>{% endblock %}

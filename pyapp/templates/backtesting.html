@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Backtesting | Trader Intelligence{% endblock %}
+{% block page_title %}Evidence & Backtesting{% endblock %}
+{% block page_subtitle %}Convert supported patterns into explicit rules and test independent market data{% endblock %}
+{% block content %}
+<p class="chart-note">Video statistics describe observed trades. A backtest evaluates a mechanical interpretation of a setup. Supported engines: liquidity sweep with close back inside the prior range, and close beyond the prior range. Both use the signal candle's extreme for the stop, fixed R:R targets and a time exit. Extra discretionary filters in a video are not reproduced automatically.</p>
+<p id="research-status" role="status" class="chart-note"></p>
+<div class="card"><div class="card-title">Automatically drafted rules</div>
+<p class="chart-note">Recurring video setups generate drafts automatically. Missing parameters remain unknown; unsupported discretionary conditions must be reviewed before testing.</p>
+{% for proposal in proposals %}<details><summary>{{ proposal.name }} · Pending review</summary><p class="chart-note">{{ proposal.reason }}</p>
+<p class="chart-note">Engine: {{ proposal.kind or 'Unsupported / unknown' }} · Direction: {{ proposal.direction or 'Unknown' }} · Timeframe: {{ proposal.timeframe or 'Unknown' }} · Lookback: {{ proposal.lookback if proposal.lookback is not none else 'Unknown' }} · Target R:R: {{ proposal.rewardRisk if proposal.rewardRisk is not none else 'Unknown' }} · Stop buffer: {{ proposal.stopBuffer if proposal.stopBuffer is not none else 'Unknown' }} · Holding bars: {{ proposal.maxHoldingBars if proposal.maxHoldingBars is not none else 'Unknown' }}</p>
+{% for quote in proposal.sourceQuotes %}<p class="chart-note">{{ quote }}</p>{% endfor %}
+<button class="btn btn-secondary" type="button" data-use-proposal="{{ proposal.id }}">Fill review form</button>
+</details>{% else %}<p class="chart-note">Drafts appear once the same evidence-backed setup recurs across two videos.</p>{% endfor %}</div>
+<div class="research-grid">
+  <div class="card">
+    <div class="card-title">1. Review a video-derived rule</div>
+    <form id="strategy-form" class="research-form">
+      <label>Recurring source pattern<select name="patternId" required>
+        {% for p in patterns if p.status == 'RECURRING' %}<option value="{{ p.id }}">{{ p.name }} · {{ p.symbol or 'Unspecified market' }} · {{ p.kind }} · {{ p.videos }} videos</option>{% endfor %}
+      </select></label>
+      <label>Market (required when not specified in source)<input name="symbol" placeholder="EURUSD"></label>
+      <label>Direction<select name="direction"><option>LONG</option><option>SHORT</option></select></label>
+      {% if not patterns %}<p class="chart-note">Process videos first. Rules require a validated pattern across at least two videos.</p>{% endif %}
+      <label>Rule engine<select name="kind"><option value="sweep_rejection">Sweep and close back inside range</option><option value="breakout">Close beyond prior range</option></select></label>
+      <label>Timeframe<select name="timeframe">{% for tf in ['M1','M5','M15','M30','H1','H4','D'] %}<option>{{ tf }}</option>{% endfor %}</select></label>
+      <label>Prior bars in range<input name="lookback" type="number" min="2" max="200" required></label>
+      <label>Target reward / risk<input name="rewardRisk" type="number" min="0.01" max="20" step="any" required></label>
+      <label>Stop buffer (absolute price units)<input name="stopBuffer" type="number" min="0" step="any" required></label>
+      <label>Maximum holding bars<input name="maxHoldingBars" type="number" min="1" max="1000" required></label>
+      <label class="research-checkbox"><input name="reviewed" type="checkbox" required> I reviewed these exact rules against the video evidence and accept this mechanical interpretation.</label>
+      <a href="/trades">Review source trade evidence</a>
+      <button class="btn btn-primary">Save reviewed strategy</button>
+    </form>
+  </div>
+  <div class="card">
+    <div class="card-title">2. Import historical candles</div>
+    <form id="dataset-form" class="research-form">
+      <label>Symbol<input name="symbol" placeholder="EURUSD" required></label>
+      <label>Timeframe<select name="timeframe">{% for tf in ['M1','M5','M15','M30','H1','H4','D'] %}<option>{{ tf }}</option>{% endfor %}</select></label>
+      <label>Data provider<input name="provider" placeholder="Provider name" required maxlength="100"></label>
+      <label>Mid-price OHLC CSV<input name="file" type="file" accept=".csv,text/csv" required></label>
+      <p class="chart-note">Columns: time,open,high,low,close. ISO timestamps must include timezone, for example 2026-10-01T10:00:00Z. 100–100,000 candles, maximum 10 MB. CSV backtests are research only; live eligibility requires data fetched directly from OANDA.</p>
+      <button class="btn btn-primary">Import CSV</button>
+    </form>
+    <hr style="margin: 1rem 0; border-color: var(--border-subtle)">
+    <form id="oanda-form" class="research-form">
+      <label>OANDA symbol<input name="symbol" placeholder="EURUSD" required></label>
+      <label>Timeframe<select name="timeframe">{% for tf in ['M1','M5','M15','M30','H1','H4','D'] %}<option>{{ tf }}</option>{% endfor %}</select></label>
+      <button class="btn btn-secondary">Fetch 5,000 OANDA candles</button>
+      <p class="chart-note">Configure OANDA credentials in Settings / .env. This accesses market data only.</p>
+    </form>
+  </div>
+  <div class="card">
+    <div class="card-title">3. Run a chronological backtest</div>
+    <form id="backtest-form" class="research-form">
+      <label>Strategy<select name="strategyId" required>{% for s in strategies %}<option value="{{ s.id }}">{{ s.name }} · {{ s.symbol }} · {{ s.timeframe }}</option>{% endfor %}</select></label>
+      <label>Candle dataset<select name="datasetId" required>{% for d in datasets %}<option value="{{ d.id }}">{{ d.provider }} · {{ d.symbol }} · {{ d.timeframe }} · {{ d.candles|length }} candles</option>{% endfor %}</select></label>
+      <label>Full spread (absolute price units)<input name="spread" type="number" min="0.000001" step="any" required></label>
+      <label>Slippage per fill (absolute price units)<input name="slippage" type="number" min="0" step="any" required></label>
+      <p class="chart-note">For EURUSD, one pip is 0.0001. Costs must be realistic for your feed. Live suggestions require at least {{ min_holdout }} closed holdout trades, positive net expectancy, matching provider, and recent data. Holdout candles must be after all source videos were published.</p>
+      <button class="btn btn-primary">Run backtest</button>
+    </form>
+  </div>
+</div>
+<div class="card">
+  <div class="card-title">Independent holdout results</div>
+  <div class="table-responsive"><table><thead><tr><th>Report</th><th>Market</th><th>Trades</th><th>Win rate</th><th>Expectancy</th><th>Net R</th><th>Drawdown R</th><th>Live gate</th></tr></thead><tbody>
+  {% for r in reports %}<tr><td><a href="/api/backtests/{{ r.id }}" target="_blank" rel="noopener">{{ r.id[:8] }}</a></td><td>{{ r.symbol }} {{ r.timeframe }}</td><td>{{ r.holdout.trades }}</td><td>{{ r.holdout.winRate if r.holdout.winRate is not none else 'Unknown' }}</td><td>{{ r.holdout.expectancyR if r.holdout.expectancyR is not none else 'Unknown' }}</td><td>{{ r.holdout.netR }}</td><td>{{ r.holdout.maxDrawdownR }}</td><td>{{ 'Eligible for paper setups' if r.eligibleForLive else 'WAIT' }}</td></tr>
+  {% else %}<tr><td colspan="8">No backtests yet. Import candles and save an evidence-linked strategy.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endblock %}
+{% block scripts %}<script id="rule-proposals" type="application/json">{{ proposals|tojson }}</script><script src="/static/js/research.js"></script>{% endblock %}

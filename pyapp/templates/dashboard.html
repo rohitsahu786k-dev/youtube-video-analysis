@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | Forex Trader Video Intelligence{% endblock %}
+{% block page_title %}Forex Intelligence Dashboard{% endblock %}
+{% block page_subtitle %}Visual trade extraction, RAG reasoning, and observed strategy models{% endblock %}
+
+{% block content %}
+<!-- Top Stats Row -->
+<div class="grid-stats">
+  <div class="stat-card">
+    <div class="stat-label">Analyzed Videos</div>
+    <div class="stat-value" style="color: var(--accent-cyan);">{{ stats.analyzedVideos }} / {{ stats.totalVideos }}</div>
+    <div class="stat-meta">{{ stats.hoursAnalyzed }} hours of live trading</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Extracted Trades</div>
+    <div class="stat-value">{{ stats.totalTrades }}</div>
+    <div class="stat-meta">Review validation status per trade</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Observed Win Rate</div>
+    <div class="stat-value" style="color: var(--accent-green);">{{ (stats.winRate|string + '%') if stats.winRate is not none else 'Unknown' }}</div>
+    <div class="stat-meta">Known observed outcomes; includes replay/paper examples</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Active Pipelines</div>
+    <div class="stat-value" style="color: var(--accent-amber);">{{ stats.activePipelines }}</div>
+    <div class="stat-meta">Queue & background workers</div>
+  </div>
+</div>
+
+<!-- Main Split Section -->
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
+  <!-- Left: Recent Extracted Trades -->
+  <div class="card">
+    <div class="card-title">
+      <span>Recent Validated Trades</span>
+      <a href="/trades" class="btn btn-secondary" style="padding: 0.35rem 0.65rem; font-size: 0.75rem;">View All Trades</a>
+    </div>
+    <div class="table-responsive">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Type</th>
+            <th>Entry</th>
+            <th>SL / TP</th>
+            <th>R:R</th>
+            <th>Result</th>
+            <th>Setup</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for trade in trades[:5] %}
+          <tr>
+            <td><strong>{{ trade.symbol }}</strong></td>
+            <td>
+              <span class="badge {% if trade.direction == 'LONG' %}badge-long{% else %}badge-short{% endif %}">
+                {{ trade.direction }}
+              </span>
+            </td>
+            <td><code>{{ trade.entry or '-' }}</code></td>
+            <td>
+              <span style="font-size: 0.75rem; color: #ef4444;">{{ trade.sl or '-' }}</span> /
+              <span style="font-size: 0.75rem; color: #10b981;">{{ trade.tp or '-' }}</span>
+            </td>
+            <td><strong>{{ trade.rr if trade.rr is not none else 'Unknown' }}{% if trade.rr is not none %}R{% endif %}</strong></td>
+            <td>
+              <span class="badge {% if trade.result == 'WIN' %}badge-win{% elif trade.result == 'LOSS' %}badge-loss{% else %}badge-uncertain{% endif %}">
+                {{ trade.result }}
+              </span>
+            </td>
+            <td style="color: var(--text-muted); font-size: 0.8rem;">{{ trade.setup }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Right: Strategy Breakdown & Contradictions -->
+  <div>
+    <div class="card">
+      <div class="card-title">
+        <span>Observed Contradictions</span>
+      </div>
+      <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 1rem;">
+        Discrepancies identified between spoken rules and actual charted trade executions:
+      </p>
+      {% for c in contradictions %}
+      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 0.85rem; margin-bottom: 0.75rem;">
+        <div style="font-size: 0.78rem; font-weight: 600; color: #b45309; margin-bottom: 0.25rem;">Spoken Rule:</div>
+        <div style="font-size: 0.82rem; color: #1e293b; margin-bottom: 0.5rem; font-style: italic;">"{{ c.a }}"</div>
+        <div style="font-size: 0.78rem; font-weight: 600; color: #b91c1c; margin-bottom: 0.25rem;">Observed Reality:</div>
+        <div style="font-size: 0.82rem; color: #1e293b; font-style: italic;">"{{ c.b }}"</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- AI Cost Efficiency Card -->
+    <div class="card">
+      <div class="card-title">
+        <span>Measured AI Usage</span>
+      </div>
+      <p>{{ usage.calls }} structured AI calls · {{ usage.tokens }} reported tokens</p>
+      <p class="chart-note">Actual billing depends on model, media and provider pricing. Check Google AI Studio for charges.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Playlists | Forex Trader Video Intelligence{% endblock %}
+{% block page_title %}Ingested Playlists{% endblock %}
+{% block page_subtitle %}Multi-video YouTube playlists for aggregate trader playbook synthesis{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-title">
+    <span>Tracked Playlists</span>
+    <button class="btn btn-primary" onclick="openIngestModal()">+ Add Playlist</button>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.5rem;">
+    {% for p in playlists %}
+    <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; display: flex; flex-direction: column; box-shadow: var(--shadow-sm);">
+      <div style="font-size: 0.72rem; color: var(--accent-blue); font-weight: 600; margin-bottom: 0.4rem;">{{ p.channel }}</div>
+      <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-main);">{{ p.title }}</h3>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1.25rem;">
+        <div style="background: #f8fafc; border: 1px solid var(--border); padding: 0.75rem; border-radius: 6px;">
+          <div style="font-size: 0.7rem; color: var(--text-muted);">Analyzed Videos</div>
+          <div style="font-size: 1.2rem; font-weight: 700; color: var(--text-main);">{{ p.analyzedCount }} / {{ p.videoCount }}</div>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid var(--border); padding: 0.75rem; border-radius: 6px;">
+          <div style="font-size: 0.7rem; color: var(--text-muted);">Observed Win Rate</div>
+          <div style="font-size: 1.2rem; font-weight: 700; color: var(--accent-green);">{{ (p.winRate|string + '%') if p.winRate is not none else 'Unknown' }}</div>
+        </div>
+      </div>
+
+      <div style="margin-top: auto;">
+        <a href="/videos?playlist={{ p.id|urlencode }}" class="btn btn-secondary" style="width: 100%; justify-content: center;">View Playlist Videos</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -1,1 +1,0 @@
-import { Header } from "@/components/ui";import { ResearchChat } from "@/components/interactive";export default function Page(){return <><Header eyebrow="RAG research" title="Ask the complete knowledge base" description="Answers cite source video timestamps and preserve spoken/visual/inference distinctions."/><ResearchChat/></>}

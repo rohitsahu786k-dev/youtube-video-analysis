@@ -1,3 +1,0 @@
-import { NextResponse } from "next/server";import IORedis from "ioredis";import { env } from "@/lib/config";
-async function redisReady(){if(!env.REDIS_URL)return false;const r=new IORedis(env.REDIS_URL,{lazyConnect:true,maxRetriesPerRequest:1,connectTimeout:1500,enableOfflineQueue:false});r.on("error",()=>{});try{await r.connect();return await r.ping()==="PONG"}catch{return false}finally{r.disconnect()}}
-export async function GET(){return NextResponse.json({status:"ok",mode:env.MOCK_AI_MODE?"demo":"real",timestamp:new Date().toISOString(),services:{database:!!env.DATABASE_URL,redis:await redisReady(),openai:!!env.OPENAI_API_KEY,youtube:!!env.YOUTUBE_API_KEY,youtubeCookies:!!env.YTDLP_COOKIES_PATH}})}

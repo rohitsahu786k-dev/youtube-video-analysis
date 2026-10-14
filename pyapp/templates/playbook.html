@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Observed Playbook | Forex Trader Video Intelligence{% endblock %}
+{% block page_title %}Observed Trader Playbook{% endblock %}
+{% block page_subtitle %}Synthesized rules, setups, risk policies, and behavioral patterns extracted across all videos{% endblock %}
+
+{% block content %}
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
+  <div>
+    <!-- Core Execution Models -->
+    <div class="card">
+      <div class="card-title">
+        <span>Core Execution Setups</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        {% for m in playbook.coreModels %}
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h3 style="font-size: 1rem; font-weight: 700; color: var(--text-main);">{{ m.name }}</h3>
+            <span class="badge badge-valid">{{ m.evidenceLevel }}</span>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 0.75rem;">
+            {{ m.trigger }}
+          </p>
+          <div style="font-size: 0.75rem; color: var(--accent-blue);">
+            <strong>Target R:R:</strong> {{ m.riskReward }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Observed Strategy Patterns -->
+    <div class="card">
+      <div class="card-title">
+        <span>Repeated Strategy Patterns</span>
+      </div>
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Pattern Name</th>
+              <th>Occurrences</th>
+              <th>Observed Win Rate</th>
+              <th>Avg R:R</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in patterns %}
+            <tr>
+              <td><strong>{{ p.name }}</strong></td>
+              <td>{{ p.occurrences }} trades</td>
+              <td style="color: var(--accent-green); font-weight: 600;">
+                {{ (p.winRate|string + '%') if p.winRate is not none else 'Unknown' }}
+              </td>
+              <td><strong>{{ p.avgR }}R</strong></td>
+              <td>{{ (p.confidence * 100)|int }}%</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar Column: Rules & Profile -->
+  <div>
+    <div class="card">
+      <div class="card-title">
+        <span>Observed Trader Profile</span>
+      </div>
+      <div style="font-size: 0.85rem; line-height: 1.8;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 0.4rem 0;">
+          <span style="color: var(--text-muted);">Trader / Channel</span>
+          <strong>{{ playbook.trader }}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 0.4rem 0;">
+          <span style="color: var(--text-muted);">Primary Timeframe</span>
+          <span>{{ playbook.primaryTimeframe }}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 0.4rem 0;">
+          <span style="color: var(--text-muted);">Observed Pairs</span>
+          <span>{{ playbook.observedMarkets|join(', ') }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <span>Source Teaching & Risk Rules</span>
+      </div>
+      <div style="font-size: 0.85rem; line-height: 1.6; display: flex; flex-direction: column; gap: 0.75rem;">
+        {% for rule in playbook.riskRules %}<p>{{ rule }}</p>{% else %}<p>No evidence-backed rules extracted yet.</p>{% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

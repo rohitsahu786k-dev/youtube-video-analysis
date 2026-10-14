@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Settings | Forex Trader Video Intelligence{% endblock %}
+{% block page_title %}Research & Runtime Settings{% endblock %}
+{% block page_subtitle %}Environment configurations, Gemini models, and external service readiness{% endblock %}
+
+{% block content %}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+  <!-- Runtime Config -->
+  <div class="card">
+    <div class="card-title">
+      <span>Runtime Model Configuration</span>
+    </div>
+    <div style="display: flex; flex-direction: column; font-size: 0.82rem;">
+      <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 0.75rem 0;">
+        <span style="color: var(--text-muted);">Analysis Model</span>
+        <code>{{ settings.GEMINI_ANALYSIS_MODEL }}</code>
+      </div>
+      <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 0.75rem 0;">
+        <span style="color: var(--text-muted);">Reasoning Model</span>
+        <code>{{ settings.GEMINI_REASONING_MODEL }}</code>
+      </div>
+      <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 0.75rem 0;">
+        <span style="color: var(--text-muted);">Final Synthesis (RAG)</span>
+        <code>{{ settings.GEMINI_FINAL_MODEL }}</code>
+      </div>
+      <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 0.75rem 0;">
+        <span style="color: var(--text-muted);">Audio Transcription</span>
+        <code>{{ settings.GEMINI_TRANSCRIBE_MODEL }}</code>
+      </div>
+      <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 0.75rem 0;">
+        <span style="color: var(--text-muted);">Embeddings Model</span>
+        <code>{{ settings.GEMINI_EMBEDDING_MODEL }}</code>
+      </div>
+      <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 0.75rem 0;">
+        <span style="color: var(--text-muted);">Processing Mode</span>
+        <code>{{ settings.AI_PROCESSING_MODE }}</code>
+      </div>
+      <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 0.75rem 0;">
+        <span style="color: var(--text-muted);">Video Concurrency</span>
+        <code>{{ settings.VIDEO_PROCESS_CONCURRENCY }}</code>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding: 0.75rem 0;">
+        <span style="color: var(--text-muted);">Max Frames per Event</span>
+        <code>{{ settings.MAX_FRAMES_PER_EVENT }}</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- Service Readiness -->
+  <div class="card">
+    <div class="card-title">
+      <span>Service Readiness</span>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 0.85rem;">
+        <span style="font-weight: 600;">Google Gemini API</span>
+        <span class="badge {% if services.gemini %}badge-valid{% else %}badge-uncertain{% endif %}">
+          {% if services.gemini %}Key Configured{% else %}Configuration Required{% endif %}
+        </span>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 0.85rem;">
+        <span style="font-weight: 600;">YouTube Data API / yt-dlp</span>
+        <span class="badge badge-valid">
+          {% if services.youtube %}API Key Connected{% else %}Native yt-dlp Engine Active{% endif %}
+        </span>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 0.85rem;">
+        <span style="font-weight: 600;">Persistent SQLite Database</span>
+        <span class="badge {% if services.database %}badge-valid{% else %}badge-uncertain{% endif %}">
+          Persistent Local Storage
+        </span>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 0.85rem;">
+        <span style="font-weight: 600;">Local Video / Frame Storage</span>
+        <span class="badge badge-valid">Ready ({{ settings.STORAGE_PATH }})</span>
+      </div>
+    </div>
+    <p class="chart-note">Live feed: {% if services.market %}OANDA credentials configured{% else %}Set OANDA_API_TOKEN and OANDA_ACCOUNT_ID in .env{% endif %}. Historical OHLC CSV imports work without a live feed. TradingView chart login is separate.</p>
+    <p style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.5;">
+      Secrets and API keys remain safely server-side in your <code>.env</code> file. No raw keys are sent to or exposed in the browser.
+    </p>
+  </div>
+</div>
+{% endblock %}
