@@ -105,13 +105,22 @@ def _unpack(text):
 
 async def embed_texts(texts):
     from google.genai import types
+    from pyapp import budget
     from pyapp.ai import get_client
     client = get_client()
     try:
         vectors = []
         for start in range(0, len(texts), 64):
-            response = await client.aio.models.embed_content(model=settings.GEMINI_EMBEDDING_MODEL, contents=texts[start:start + 64],
-                                                              config=types.EmbedContentConfig(output_dimensionality=768, task_type="RETRIEVAL_DOCUMENT"))
+            batch = texts[start:start + 64]
+            await budget.require_available("embed")
+            try:
+                response = await client.aio.models.embed_content(model=settings.GEMINI_EMBEDDING_MODEL, contents=batch,
+                                                                  config=types.EmbedContentConfig(output_dimensionality=768, task_type="RETRIEVAL_DOCUMENT"))
+            except Exception as exc:
+                if budget.is_exhaustion_error(exc):
+                    await budget.mark_provider_exhausted(exc)
+                raise
+            await budget.record("embed", settings.GEMINI_EMBEDDING_MODEL, budget.embed_usage(response, batch))
             vectors.extend(e.values for e in response.embeddings)
         return vectors
     finally:
@@ -121,10 +130,18 @@ async def embed_texts(texts):
 
 async def embed_query(text):
     from google.genai import types
+    from pyapp import budget
     from pyapp.ai import get_client
     client = get_client()
     try:
-        response = await client.aio.models.embed_content(model=settings.GEMINI_EMBEDDING_MODEL, contents=[text], config=types.EmbedContentConfig(output_dimensionality=768, task_type="RETRIEVAL_QUERY"))
+        await budget.require_available("embed")
+        try:
+            response = await client.aio.models.embed_content(model=settings.GEMINI_EMBEDDING_MODEL, contents=[text], config=types.EmbedContentConfig(output_dimensionality=768, task_type="RETRIEVAL_QUERY"))
+        except Exception as exc:
+            if budget.is_exhaustion_error(exc):
+                await budget.mark_provider_exhausted(exc)
+            raise
+        await budget.record("embed", settings.GEMINI_EMBEDDING_MODEL, budget.embed_usage(response, [text]))
         return response.embeddings[0].values
     finally:
         await client.aio.aclose()

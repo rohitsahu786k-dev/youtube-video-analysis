@@ -82,3 +82,68 @@ def test_unusable_response_still_records_billable_usage(monkeypatch, response_te
         assert rows[0]["costUsd"] > 0
 
     asyncio.run(scenario())
+
+
+def fake_embed_client(monkeypatch, billable_characters=4000):
+    embed = AsyncMock(return_value=SimpleNamespace(
+        embeddings=[SimpleNamespace(values=[0.1, 0.2, 0.3])],
+        metadata=SimpleNamespace(billable_character_count=billable_characters),
+    ))
+    client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(embed_content=embed), aclose=AsyncMock()),
+        close=Mock(),
+    )
+    monkeypatch.setattr(ai, "get_client", lambda: client)
+    return embed
+
+
+def test_embedding_spend_is_recorded(monkeypatch):
+    from pyapp import retrieval
+    monkeypatch.setattr(settings, "AI_DAILY_BUDGET_USD", 3.0)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    fake_embed_client(monkeypatch)
+
+    async def scenario():
+        await retrieval.embed_query("what is the entry rule")
+        rows = await db.list("usage")
+        assert [r["kind"] for r in rows] == ["embed"]
+        assert rows[0]["promptTokens"] == 1000          # 4000 billable characters
+        assert rows[0]["costUsd"] > 0
+
+    asyncio.run(scenario())
+
+
+def test_embedding_refused_once_budget_is_spent(monkeypatch):
+    from pyapp import retrieval
+    monkeypatch.setattr(settings, "AI_DAILY_BUDGET_USD", 0.0000001)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    embed = fake_embed_client(monkeypatch)
+
+    async def scenario():
+        await retrieval.embed_query("first question")
+        with pytest.raises(budget.BudgetExceeded):
+            await retrieval.embed_texts(["a chunk of knowledge"])
+        assert embed.await_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_embedding_halts_everything_when_credits_are_gone(monkeypatch):
+    from pyapp import retrieval
+    monkeypatch.setattr(settings, "AI_DAILY_BUDGET_USD", 3.0)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    depleted = RuntimeError("402 RESOURCE_EXHAUSTED prepayment credits are depleted")
+    client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(embed_content=AsyncMock(side_effect=depleted)), aclose=AsyncMock()),
+        close=Mock(),
+    )
+    monkeypatch.setattr(ai, "get_client", lambda: client)
+
+    async def scenario():
+        with pytest.raises(RuntimeError):
+            await retrieval.embed_query("question")
+        assert await budget.provider_halt() is not None
+        assert "exhausted" in (await budget.blocked("video"))
+        await budget.clear_provider_halt()
+
+    asyncio.run(scenario())

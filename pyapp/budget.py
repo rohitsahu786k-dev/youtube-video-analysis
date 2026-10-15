@@ -54,6 +54,24 @@ async def video_cost_usd(video_id: str) -> float:
     return sum(r.get("costUsd", 0) for r in rows)
 
 
+CHARS_PER_TOKEN = 4
+
+
+class EmbedUsage:
+    """Embedding responses report billable characters instead of token counts; this adapts them to the
+    same accounting path as generative calls so their spend is capped and visible rather than invisible."""
+
+    def __init__(self, tokens: int):
+        self.prompt_token_count = tokens
+        self.candidates_token_count = 0
+        self.thoughts_token_count = 0
+
+
+def embed_usage(response, texts) -> EmbedUsage:
+    chars = int(getattr(getattr(response, "metadata", None), "billable_character_count", 0) or 0)
+    return EmbedUsage(max(1, (chars or sum(len(t) for t in texts)) // CHARS_PER_TOKEN))
+
+
 def price_for(model: str) -> tuple[float, float]:
     if settings.GEMINI_PRICING_JSON:
         try:
