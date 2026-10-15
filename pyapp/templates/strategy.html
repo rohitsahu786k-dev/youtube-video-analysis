@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}{{ s.name }} · Strategy Library{% endblock %}
+{% block page_title %}{{ s.name }}{% endblock %}
+{% block page_subtitle %}Complete A–Z manual · every rule links to its source video and timestamp{% endblock %}
+
+{% macro cites(ids) %}{% for i in ids %}{% set e = s.evidence.get(i) %}{% if e %}<button class="cite" data-evidence="{{ i }}" data-kind="atom" title="“{{ e.quote }}” — {{ e.videoTitle }}">▶ {{ '%d:%02d'|format(e.startTime // 60, e.startTime % 60) }}</button>{% endif %}{% endfor %}{% endmacro %}
+
+{% block content %}
+<div class="row between" style="margin-bottom:1rem">
+  <div class="row">
+    <span class="pill info">{{ s.relation }}{% if s.variationOf %} of {{ s.variationOf }}{% endif %}</span>
+    {% if s.userAuthored %}<span class="pill">user-authored</span>{% endif %}
+    {% if s.orphaned %}<span class="pill bad">source evidence changed — rebuild</span>{% endif %}
+    <select class="input" id="reviewStatus" style="width:160px" aria-label="Review status">{% for v, l in [('NEEDS_REVIEW','Needs review'),('IN_REVIEW','In review'),('REVIEWED','Reviewed')] %}<option value="{{ v }}" {% if s.status == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+    <button class="btn sm ghost" id="star">{{ '★ Starred' if s.starred else '☆ Star' }}</button>
+  </div>
+  <div class="row">
+    <a class="btn btn-secondary sm" href="/qa?strategy={{ s.id }}">Ask AI about this</a>
+    {% if ai_ready is not defined or true %}<button class="btn btn-secondary sm" id="translate">Translate rules to executable draft (AI)</button>{% endif %}
+    <a class="btn btn-primary sm" href="/editor?strategy={{ s.id }}">Open editor &amp; approval</a>
+    {% if s.userAuthored %}<button class="btn ghost sm" id="rename">Rename</button><button class="btn ghost sm" id="remove">Delete</button>{% endif %}
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="label">Source videos</div><div class="value">{{ s.sources|length }}</div></div>
+  <div class="kpi"><div class="label">Verified rules</div><div class="value">{{ s.confirmedCount }}</div><div class="sub">{{ s.unverifiedCount }} unverified</div></div>
+  <div class="kpi"><div class="label">Trade examples</div><div class="value">{{ s.exampleCount }}</div><div class="sub">kept separate</div></div>
+  <div class="kpi"><div class="label">Completeness</div><div class="value">{{ s.completeness.score }}%</div><div class="sub">objective share {{ (s.completeness.objectiveShare * 100)|round|int }}%</div></div>
+  <div class="kpi"><div class="label">Conflicts</div><div class="value {% if s.conflicts %}neg{% endif %}">{{ s.conflicts|length }}</div></div>
+  <div class="kpi"><div class="label">Evidence score</div><div class="value">{{ s.rankScore|round|int }}</div></div>
+</div>
+
+{% if s.conflicts %}
+<div class="card" style="border-color:var(--bad)">
+  <div class="card-title neg">Conflicting explanations (not resolved — both are shown)</div>
+  {% for c in s.conflicts %}<div style="margin-bottom:1rem"><strong>{{ c.topic }}</strong><div class="small muted">{{ c.description }}</div>
+    {% for st in c.statements %}<div class="manual-item conflict"><button class="cite" data-evidence="{{ st.atomId }}" data-kind="atom">▶ evidence</button> {{ st.text }}<div class="small muted">{{ st.video }}{% if st.published and st.published != 'Unknown' %} · published {{ st.published }}{% endif %}</div></div>{% endfor %}</div>{% endfor %}
+</div>
+{% endif %}
+
+{% if s.manual %}
+<div class="split">
+  <div>
+    {% for sec in sections %}
+      {% set items = s.manual.get(sec, []) %}
+      {% set titles = {'objective':'Strategy objective and rationale','instruments_timeframes_sessions':'Instruments, timeframes and sessions','chart_setup_indicators':'Chart setup and indicators','chart_preparation':'Chart preparation','htf_analysis':'Higher-timeframe analysis','execution_steps':'Step-by-step execution sequence','entry_rules':'Entry rules','stop_loss_rules':'Stop-loss rules','take_profit_rules':'Take-profit and risk-to-reward','trade_management':'Trade management','risk_management':'Risk and money management','sessions_time':'Trading sessions and time restrictions','avoidance':'Trade-avoidance checklist','supporting_knowledge':'Supporting educational knowledge'} %}
+      <section class="manual-section card">
+        <h3>{{ titles[sec] }}</h3>
+        {% if items %}
+          {% if sec == 'execution_steps' %}<ol class="steps">{% for it in items %}<li><strong>{{ it.title }}</strong> — {{ it.text }} {{ cites(it.atomIds) }}</li>{% endfor %}</ol>
+          {% else %}{% for it in items %}<div class="manual-item">{{ it.text }} {{ cites(it.atomIds) }}{% if it.note %}<div class="small muted">{{ it.note }}</div>{% endif %}</div>{% endfor %}{% endif %}
+        {% else %}<div class="manual-item missing">Not stated in the analysed sources. Nothing is assumed here.</div>{% endif %}
+      </section>
+    {% endfor %}
+  </div>
+  <div>
+    <div class="card"><div class="card-title">What the sources do not say</div>{% for m in s.manualMissing %}<div class="small" style="margin-bottom:.35rem">⚠ {{ m }}</div>{% else %}<div class="small muted">Nothing missing.</div>{% endfor %}
+      <p class="small muted">Missing items stay missing until you approve an explicit, labelled testing assumption in the editor.</p></div>
+    <div class="card"><div class="card-title">Source videos</div>{% for v in s.sources %}<div class="small" style="margin-bottom:.5rem"><a href="/videos/{{ v.videoId }}">{{ v.title }}</a><div class="muted">{{ v.atoms }} rules{% if v.published and v.published != 'Unknown' %} · {{ v.published }}{% endif %} · <a href="{{ v.url }}" target="_blank" rel="noopener">first mention ↗</a></div></div>{% endfor %}</div>
+    <div class="card"><div class="card-title">Executable versions</div>
+      {% for v in s.versions %}<div class="small row between" style="margin-bottom:.4rem"><a href="/editor?strategy={{ s.id }}&version={{ v.id }}">{{ v.label }}</a><span>{{ v.status|lower }} {% if v.readiness %}· {{ v.readiness.level|replace('_',' ')|lower }}{% endif %}</span></div>{% else %}<div class="small muted">None yet. Translate the rules or write them by hand in the editor.</div>{% endfor %}</div>
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="empty">{% if s.userAuthored %}This is your own strategy; it has no instructor evidence.{% else %}{{ s.manualMissing[0] if s.manualMissing else 'No manual yet.' }}{% endif %}</div></div>
+{% endif %}
+
+<div class="card"><div class="card-title">Your notes</div><textarea class="input" id="notes" rows="3" maxlength="4000" placeholder="Private notes about this strategy">{{ s.notes }}</textarea><div class="row end" style="margin-top:.5rem"><button class="btn btn-secondary sm" id="saveNotes">Save notes</button></div></div>
+
+<h2 class="section" style="margin-top:1.5rem">Individual trade examples</h2>
+<div class="card flush">
+  {% if s.examples %}<div class="table-responsive"><table><thead><tr><th>Type</th><th>Example</th><th>Mode</th><th>Outcome</th><th>Source</th></tr></thead><tbody>
+    {% for e in s.examples %}<tr><td><span class="pill">{{ e.kind }}</span></td>
+      <td>{% if e.kind == 'trade' %}{{ e.symbol }} {{ e.direction }} <span class="small muted">({{ e.validation|lower }})</span>{% else %}{{ e.text }}{% endif %}</td>
+      <td>{{ (e.executionMode or '—')|lower }}</td><td>{{ (e.outcome or 'unknown')|lower }}</td><td>{% if e.sourceUrl %}<a href="{{ e.sourceUrl }}" target="_blank" rel="noopener">video ↗</a>{% endif %}{% if e.atomId %} <button class="cite" data-evidence="{{ e.atomId }}" data-kind="atom">▶</button>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">No separate trade examples were identified. Distinct examples are never merged into a hypothetical trade.</div>{% endif %}
+</div>
+
+{% if s.unverifiedAtoms %}
+<details class="card"><summary><strong>{{ s.unverifiedAtoms|length }} unverified observations</strong> <span class="small muted">— the model's wording could not be found in the transcript, so they are excluded from the manual</span></summary>
+  {% for a in s.unverifiedAtoms %}<div class="manual-item missing" style="margin-top:.4rem">{{ a.text }}<div class="quote">“{{ a.quote }}”</div><div class="small">{{ a.videoTitle }}</div></div>{% endfor %}
+</details>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+const id = {{ s.id|tojson }};
+document.getElementById("reviewStatus").addEventListener("change", async (e) => { try { await UI.api(`/api/library/strategies/${id}`, { method: "PATCH", json: { status: e.target.value } }); UI.toast("Saved", "ok"); } catch (err) { UI.toast(err.message, "bad"); } });
+document.getElementById("star").addEventListener("click", async (e) => { const starred = !e.target.textContent.includes("Starred"); try { await UI.api(`/api/library/strategies/${id}`, { method: "PATCH", json: { starred } }); e.target.textContent = starred ? "★ Starred" : "☆ Star"; } catch (err) { UI.toast(err.message, "bad"); } });
+document.getElementById("saveNotes").addEventListener("click", async () => { try { await UI.api(`/api/library/strategies/${id}`, { method: "PATCH", json: { notes: document.getElementById("notes").value } }); UI.toast("Notes saved", "ok"); } catch (e) { UI.toast(e.message, "bad"); } });
+document.getElementById("rename")?.addEventListener("click", async () => { const name = prompt("New name", {{ s.name|tojson }}); if (!name) return; try { await UI.api(`/api/library/strategies/${id}`, { method: "PATCH", json: { name } }); location.reload(); } catch (e) { UI.toast(e.message, "bad"); } });
+document.getElementById("remove")?.addEventListener("click", async () => { if (!confirm("Delete this strategy and its drafts?")) return; try { await UI.api(`/api/library/strategies/${id}`, { method: "DELETE" }); location.href = "/library"; } catch (e) { UI.toast(e.message, "bad"); } });
+document.getElementById("translate").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  try { const job = await UI.api(`/api/library/strategies/${id}/translate`, { method: "POST" }); UI.toast("Translating — this can take a minute"); const done = await UI.pollJob(job.id, j => e.target.textContent = j.message.slice(0, 44)); UI.toast("Draft created — review it before approving", "ok"); location.href = `/editor?strategy=${id}&version=${done.result.versionId}`; }
+  catch (err) { UI.toast(err.message, "bad"); e.target.disabled = false; e.target.textContent = "Translate rules to executable draft (AI)"; }
+});
+</script>
+{% endblock %}

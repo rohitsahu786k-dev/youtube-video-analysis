@@ -1,131 +1,104 @@
 {% extends "base.html" %}
-
-{% block title %}{{ video.title }} | Forex Trader Video Intelligence{% endblock %}
+{% block title %}{{ video.title }} · Trader Video Intelligence{% endblock %}
 {% block page_title %}{{ video.title }}{% endblock %}
-{% block page_subtitle %}{{ video.channel }} &bull; {{ (video.duration // 60) }} minutes &bull; Status: {{ video.status }}{% endblock %}
+{% block page_subtitle %}{{ video.channel }} · {{ ((video.duration or 0) // 60) }} minutes{% if video.published and video.published != 'Unknown' %} · published {{ video.published }}{% endif %}{% endblock %}
 
 {% block content %}
-{% if video.error %}<div class="card"><strong>Processing failed</strong><p class="chart-note">{{ video.error }}</p><button class="btn btn-secondary" data-retry-url="/api/videos/{{ video.id }}/retry">Retry processing</button></div>{% endif %}
-{% if video.coverage %}<div class="card"><p class="chart-note">Analyzed {{ video.coverage.analyzedEvents }} / {{ video.coverage.detectedEvents }} detected events. {{ video.coverage.limitations }} {% if video.coverage.truncated %}<strong>Event coverage was capped; this analysis is partial.</strong>{% endif %}</p></div>{% endif %}
-{% if video.mediaQuality %}<p class="chart-note">Source resolution: {{ video.mediaQuality.width }} × {{ video.mediaQuality.height }}. {% if video.mediaQuality.height < 720 %}Low-resolution footage may not support exact price readings.{% endif %}</p>{% endif %}
-<div style="display: grid; grid-template-columns: 2fr 1.2fr; gap: 1.5rem; margin-bottom: 2rem;">
-  <!-- Video Player Column -->
-  <div>
-    <div class="card" style="padding: 0; overflow: hidden;">
-      <div style="position: relative; width: 100%; aspect-ratio: 16/9; background: #000;">
-        <iframe
-          style="width: 100%; height: 100%; border: none;"
-          src="https://www.youtube.com/embed/{{ video.youtubeId }}?rel=0"
-          allowfullscreen>
-        </iframe>
-      </div>
-      <div style="padding: 1.25rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-          <h2 style="font-size: 1.1rem; font-weight: 700;">{{ video.title }}</h2>
-          <span class="badge badge-valid">{{ video.status }}</span>
-        </div>
-        <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5;">
-          {{ video.description or "Automated Forex trade extraction: candidate events detected from spoken transcript and aligned with visual chart frame evidence." }}
-        </p>
-      </div>
-    </div>
+{% if video.error %}<div class="banner bad"><strong>Processing failed.</strong> {{ video.error }} <button class="btn sm ghost" data-retry-url="/api/videos/{{ video.id }}/retry">Retry processing</button></div>{% endif %}
+{% if video.status == 'AWAITING_PERMISSION' or video.status == 'UNAVAILABLE' %}<div class="banner warn">{{ video.statusNote }} Upload an authorized transcript or media file from the <a href="/sources">Source Manager</a>.</div>{% endif %}
+{% if video.visualAnalysis is sameas false and video.status == 'COMPLETED' %}<div class="banner warn"><strong>Transcript-only analysis.</strong> No chart frames were available, so chart evidence was not analysed and no trade execution is verified.</div>{% endif %}
+{% if estimated %}<div class="banner warn">The uploaded transcript had no timestamps; times were <strong>estimated</strong> from word counts and links may be off by a minute or more.</div>{% endif %}
+{% if video.strategyWarning %}<div class="banner warn">{{ video.strategyWarning }}</div>{% endif %}
+{% if video.sourceChanged %}<div class="banner info">The source video's title or length changed since analysis. <button class="btn sm ghost" id="reprocessBtn">Reprocess</button></div>{% endif %}
+{% if video.coverage %}<div class="banner info">Analysed {{ video.coverage.analyzedEvents }} of {{ video.coverage.detectedEvents }} detected events{% if video.coverage.sceneChanges %} · {{ video.coverage.sceneChanges }} chart/scene changes used to place frames{% endif %}. {{ video.coverage.limitations }}{% if video.coverage.truncated %} <strong>Event coverage was capped; this analysis is partial.</strong>{% endif %}</div>{% endif %}
+{% if video.mediaQuality and video.mediaQuality.height < 720 %}<div class="banner warn">Source resolution {{ video.mediaQuality.width }}×{{ video.mediaQuality.height }}: low-resolution footage may not support exact price readings.</div>{% endif %}
 
-    <!-- Extracted Trades for this Video -->
-    <div class="card">
-      <div class="card-title">
-        <span>Extracted Trades in this Video ({{ trades|length }})</span>
+<div class="split">
+  <div>
+    <div class="card flush"><iframe id="player" class="video-embed" src="https://www.youtube-nocookie.com/embed/{{ video.youtubeId }}?rel=0" title="{{ video.title }}" allowfullscreen loading="lazy"></iframe></div>
+    <div data-tabs="#detail" data-hash="1" class="tabs" role="tablist">
+      <button class="tab active" data-tab="transcript">Transcript ({{ transcript|length }})</button>
+      <button class="tab" data-tab="chart">Chart evidence ({{ observations|length }})</button>
+      <button class="tab" data-tab="rules">Extracted rules ({{ atoms|length }})</button>
+      <button class="tab" data-tab="trades">Trades ({{ trades|length }})</button>
+      <button class="tab" data-tab="events">Events ({{ events|length }})</button>
+    </div>
+    <div id="detail">
+      <div class="tab-panel active" id="transcript">
+        <input class="input" id="tfilter" placeholder="Search the transcript" aria-label="Search the transcript" style="margin-bottom:.6rem">
+        <div class="card" style="max-height:520px;overflow:auto" id="tlist">
+          {% for s in transcript %}<div class="small seg" style="margin-bottom:.35rem" data-t="{{ s.start }}"><a href="#" class="mono seek" data-t="{{ s.start }}">{{ '%d:%02d'|format(s.start // 60, s.start % 60) }}</a> {{ s.text }}</div>
+          {% else %}<div class="empty">No transcript stored.</div>{% endfor %}
+        </div>
       </div>
-      <div class="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Pair</th>
-              <th>Direction</th>
-              <th>Entry</th>
-              <th>SL / TP</th>
-              <th>R:R</th>
-              <th>Outcome</th>
-              <th>Validation</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for t in trades %}
-            <tr>
-              <td>{{ t.number }}</td>
-              <td><a href="/charts?symbol={{ (t.symbol or 'EURUSD')|urlencode }}" title="View market chart"><strong>{{ t.symbol }}</strong></a></td>
-              <td>
-                <span class="badge {% if t.direction == 'LONG' %}badge-long{% else %}badge-short{% endif %}">{{ t.direction }}</span>
-              </td>
-              <td><code>{{ t.entry or '-' }}</code></td>
-              <td>{{ t.sl or '-' }} / {{ t.tp or '-' }}</td>
-              <td><strong>{{ t.rr if t.rr is not none else 'Unknown' }}</strong></td>
-              <td>
-                <span class="badge {% if t.result == 'WIN' %}badge-win{% elif t.result == 'LOSS' %}badge-loss{% else %}badge-uncertain{% endif %}">{{ t.result }}</span>
-              </td>
-              <td>
-                <span class="badge {% if t.validation == 'VALID' %}badge-valid{% else %}badge-uncertain{% endif %}">{{ t.validation }}</span>
-                <span class="chart-note">{{ t.executionMode|default('UNKNOWN') }}</span>
-              </td>
-            </tr>
-            {% else %}
-            <tr>
-              <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">No trades extracted for this video yet.</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="tab-panel" id="chart">
+        <h2 class="section">Captured chart evidence</h2>
+        {% for o in observations %}
+        <div class="card">
+          <div class="row between"><div><a href="#" class="seek mono" data-t="{{ o.timestamp }}">{{ '%d:%02d'|format(o.timestamp // 60, o.timestamp % 60) }}</a>
+            {% if o.summary.symbol %}<span class="pill info">{{ o.summary.symbol }}{% if o.summary.timeframe %} · {{ o.summary.timeframe }}{% endif %}</span>{% endif %}
+            {% if o.summary.executionVisible %}<span class="pill ok">execution visible</span>{% else %}<span class="pill">no visible execution</span>{% endif %}
+            {% if o.summary.confidence is defined and o.summary.confidence is not none %}<span class="small muted">confidence {{ (o.summary.confidence * 100)|round|int }}%</span>{% endif %}</div></div>
+          <p class="small" style="margin:.5rem 0">{{ o.summary.visualDescription }}</p>
+          {% if o.transcript %}<div class="quote">What was said: “{% for t in o.transcript[:4] %}{{ t.text }} {% endfor %}”</div>{% endif %}
+          <div class="frame-strip">{% for f in o.frames %}<a href="{{ f.url }}" target="_blank" rel="noopener" title="{{ '%d:%02d'|format(f.timestamp // 60, f.timestamp % 60) }} · sha256 {{ (f.sha256 or '')[:10] }}"><img src="{{ f.url }}" alt="Chart frame at {{ f.timestamp }}s" loading="lazy"></a>{% endfor %}</div>
+        </div>
+        {% else %}<div class="card"><div class="empty">No chart frames were analysed for this video.</div></div>{% endfor %}
+      </div>
+      <div class="tab-panel" id="rules">
+        {% if atoms %}
+        <div class="row" style="margin-bottom:.6rem"><select class="input" id="catFilter" style="max-width:220px" aria-label="Category"><option value="">All categories</option>{% for c in atoms|map(attribute='category')|unique|sort %}<option>{{ c }}</option>{% endfor %}</select>
+          <label class="check"><input type="checkbox" id="onlyConfirmed"> Only source-confirmed</label>
+          <button class="btn sm ghost" id="reextract">Re-extract strategies</button></div>
+        <div class="card flush"><div class="table-responsive"><table id="atomTable"><thead><tr><th>Time</th><th>Category</th><th>Rule / teaching</th><th>Evidence</th></tr></thead><tbody>
+          {% for a in atoms %}<tr data-cat="{{ a.category }}" data-prov="{{ a.provenance }}"><td><a href="#" data-evidence="{{ a.id }}" data-kind="atom" class="mono">{{ '%d:%02d'|format(a.startTime // 60, a.startTime % 60) }}</a></td>
+            <td><span class="pill">{{ a.category|replace('_',' ') }}</span>{% if a.strategyName %}<div class="small muted">{{ a.strategyName }}</div>{% endif %}</td>
+            <td>{{ a.text }}<div class="quote">“{{ a.quote }}”</div></td>
+            <td>{% if a.provenance == 'source_confirmed' %}<span class="pill ok">source-confirmed</span>{% else %}<span class="pill warn" title="The quoted words were not found in the transcript">unverified</span>{% endif %}
+              <div class="small muted">{{ a.evidenceType }}{% if a.frames %} · {{ a.frames|length }} frames{% endif %}{% if a.timestampCorrected %} · time corrected{% endif %}</div></td></tr>{% endfor %}
+        </tbody></table></div></div>
+        {% else %}<div class="card"><div class="empty">No rules extracted yet. {% if video.status == 'COMPLETED' %}<button class="btn sm ghost" id="reextract">Extract strategies now</button>{% endif %}</div></div>{% endif %}
+      </div>
+      <div class="tab-panel" id="trades">
+        <div class="card flush">{% if trades %}<div class="table-responsive"><table><thead><tr><th>#</th><th>Instrument</th><th>Direction</th><th>Entry</th><th>SL / TP</th><th>R:R</th><th>Mode</th><th>Outcome</th><th>Validation</th></tr></thead><tbody>
+          {% for t in trades %}<tr><td>{{ t.number }}</td><td>{{ t.symbol }}</td><td><span class="pill {{ 'ok' if t.direction == 'LONG' else 'bad' }}">{{ t.direction }}</span></td><td class="mono">{{ t.entry or '—' }}</td><td class="mono">{{ t.sl or '—' }} / {{ t.tp or '—' }}</td><td>{{ t.rr or '—' }}</td>
+            <td><span class="pill">{{ t.executionMode|lower }}</span></td><td>{{ t.result|lower }}</td><td><span class="pill {{ 'ok' if t.validation == 'VALID' else 'warn' }}" title="{{ t.validationReason }}">{{ t.validation|lower }}</span></td></tr>{% endfor %}
+        </tbody></table></div>{% else %}<div class="empty">No executed trades were identified. Position drawings alone are never counted as executions.</div>{% endif %}</div>
+        <p class="small muted">AI readings are not human-verified. Replay or demo wins are not live results.</p>
+      </div>
+      <div class="tab-panel" id="events">
+        <div class="card flush"><div class="table-responsive"><table><thead><tr><th>Time</th><th>Event</th><th>Source</th><th>Confidence</th></tr></thead><tbody>
+          {% for e in events %}<tr><td><a href="#" class="seek mono" data-t="{{ e.timestamp }}">{{ '%d:%02d'|format(e.timestamp // 60, e.timestamp % 60) }}</a></td><td>{{ e.eventType }}<div class="small muted">{{ e.transcriptEvidence }}</div></td><td>{{ e.detectionSource }}</td><td>{% if e.confidence is defined and e.confidence is not none %}{{ (e.confidence * 100)|round|int }}%{% else %}—{% endif %}</td></tr>{% endfor %}
+        </tbody></table></div></div>
       </div>
     </div>
   </div>
 
-  <!-- Detected Timeline Events & Transcript -->
   <div>
-    <div class="card">
-      <div class="card-title">
-        <span>Detected Candidate Events ({{ events|length }})</span>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 0.75rem; max-height: 480px; overflow-y: auto;">
-        {% for ev in events %}
-        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-            <span style="font-size: 0.75rem; font-weight: 600; color: var(--accent-blue);">{{ ev.eventType }}</span>
-            <code style="font-size: 0.75rem; color: var(--text-main); background: #e2e8f0; padding: 2px 6px; border-radius: 4px;">{{ (ev.timestamp // 60)|int }}:{{ "%02d"|format((ev.timestamp % 60)|int) }}</code>
-          </div>
-          <div style="font-size: 0.82rem; color: var(--text-main); margin-bottom: 0.35rem; line-height: 1.4;">{{ ev.transcriptEvidence }}</div>
-          <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; gap: 0.5rem;">
-            <span>Source: {{ ev.detectionSource }}</span>
-            <span>&bull;</span>
-            <span>Conf: {{ (ev.confidence * 100)|int }}%</span>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
+    <div class="card"><div class="card-title">About this analysis</div>
+      <table><tbody>
+        <tr><td class="muted">Status</td><td><span class="pill {{ 'ok' if video.status == 'COMPLETED' else '' }}">{{ video.status|replace('_',' ')|lower }}</span></td></tr>
+        <tr><td class="muted">Input</td><td>{{ (video.inputMode or 'download')|replace('_',' ') }}</td></tr>
+        <tr><td class="muted">Chart analysis</td><td>{{ 'yes' if video.visualAnalysis is not sameas false else 'no' }}</td></tr>
+        <tr><td class="muted">Rules (confirmed / extracted)</td><td>{{ video.atomsVerified or 0 }} / {{ video.atoms or 0 }}</td></tr>
+        <tr><td class="muted">Evidence cutoff</td><td class="small">{{ (video.evidenceCutoff or '—')[:10] }}</td></tr>
+        <tr><td class="muted">Watch</td><td><a href="https://www.youtube.com/watch?v={{ video.youtubeId }}" target="_blank" rel="noopener">YouTube ↗</a></td></tr>
+      </tbody></table>
+      <p class="small muted" style="margin-top:.6rem">A rule is <em>source-confirmed</em> only if its quoted words were found in the transcript. Everything else is flagged unverified and never enters a strategy manual.</p>
+      <button class="btn sm ghost" id="reprocessBtn2" style="margin-top:.4rem">Reprocess video</button>
     </div>
-
-    <!-- Transcript Segments -->
-    <div class="card">
-      <div class="card-title">
-        <span>Spoken Audio Transcript</span>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 0.6rem; max-height: 320px; overflow-y: auto;">
-        {% for seg in transcript %}
-        <div style="font-size: 0.8rem; border-left: 3px solid var(--accent-blue); padding-left: 0.75rem; background: #f8fafc; padding: 0.5rem 0.75rem; border-radius: 0 6px 6px 0;">
-          <div style="font-size: 0.7rem; color: var(--accent-blue); font-weight: 600; margin-bottom: 0.15rem;">
-            {{ (seg.start // 60)|int }}:{{ "%02d"|format((seg.start % 60)|int) }} - {{ (seg.end // 60)|int }}:{{ "%02d"|format((seg.end % 60)|int) }}
-          </div>
-          <div style="color: var(--text-main); line-height: 1.4;">{{ seg.text }}</div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
+    {% if video.description %}<div class="card"><div class="card-title">Description</div><p class="small muted" style="white-space:pre-wrap">{{ video.description[:900] }}</p></div>{% endif %}
   </div>
 </div>
-<div class="card"><div class="card-title">Captured chart evidence</div>
-{% for observation in video.observations|default([]) %}
-<details style="margin-bottom: 1rem"><summary>{{ observation.timestamp|round(1) }}s · {{ observation.summary.symbol or 'Unreadable symbol' }} · {{ observation.summary.timeframe or 'Unreadable timeframe' }}</summary>
-<p class="chart-note">{{ observation.summary.visualDescription }}</p>
-<div class="evidence-grid">{% for frame in observation.frames %}<a href="{{ frame.url }}" target="_blank" rel="noopener"><img src="{{ frame.url }}" alt="Chart frame at {{ frame.timestamp }} seconds" loading="lazy"><span>{{ frame.timestamp }}s</span></a>{% endfor %}</div>
-</details>{% else %}<p class="chart-note">Captured chart frames appear here after analysis.</p>{% endfor %}
-</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const player = document.getElementById("player");
+document.addEventListener("click", (e) => { const a = e.target.closest(".seek"); if (!a) return; e.preventDefault(); player.src = "https://www.youtube-nocookie.com/embed/{{ video.youtubeId }}?rel=0&autoplay=1&start=" + Math.floor(a.dataset.t); player.scrollIntoView({behavior:"smooth", block:"center"}); });
+document.getElementById("tfilter")?.addEventListener("input", (e) => { const q = e.target.value.toLowerCase(); document.querySelectorAll("#tlist .seg").forEach(d => d.style.display = d.textContent.toLowerCase().includes(q) ? "" : "none"); });
+function filterAtoms() { const c = document.getElementById("catFilter")?.value, only = document.getElementById("onlyConfirmed")?.checked; document.querySelectorAll("#atomTable tbody tr").forEach(r => r.style.display = ((!c || r.dataset.cat === c) && (!only || r.dataset.prov === "source_confirmed")) ? "" : "none"); }
+document.getElementById("catFilter")?.addEventListener("change", filterAtoms); document.getElementById("onlyConfirmed")?.addEventListener("change", filterAtoms);
+document.querySelectorAll("#reextract").forEach(b => b.addEventListener("click", async () => { b.disabled = true; try { const r = await UI.api("/api/videos/{{ video.id }}/extract-strategies", {method:"POST"}); UI.toast(`${r.verified} of ${r.atoms} rules source-confirmed`, "ok"); setTimeout(() => location.reload(), 900); } catch (e) { UI.toast(e.message, "bad"); b.disabled = false; } }));
+["reprocessBtn","reprocessBtn2"].forEach(id => document.getElementById(id)?.addEventListener("click", async () => { if (!confirm("Re-run the full analysis of this video?")) return; try { await UI.api("/api/videos/{{ video.id }}/reprocess", {method:"POST"}); UI.toast("Queued", "ok"); setTimeout(() => location.href = "/sources", 700); } catch (e) { UI.toast(e.message, "bad"); } }));
+</script>
 {% endblock %}

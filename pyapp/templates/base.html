@@ -1,129 +1,108 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Forex Trader Video Intelligence{% endblock %}</title>
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}Trader Video Intelligence{% endblock %}</title>
+  <script>try{var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}catch(e){}</script>
+  <link rel="preload" href="/static/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/css/fonts.css">
   <link rel="stylesheet" href="/static/css/style.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22><text y=%2220%22 font-size=%2220%22>⚡</text></svg>">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="icon" href="/static/img/logo.png" type="image/png">
+  <link rel="alternate icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%232563eb%22/><path d=%22M7 21l6-7 4 4 8-10%22 stroke=%22white%22 stroke-width=%223%22 fill=%22none%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
 </head>
 <body>
+  <a href="#main" class="skip-link">Skip to content</a>
+  {% set icons = {
+    'dashboard': '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+    'media': '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/>',
+    'sources': '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/>',
+    'videos': '<circle cx="12" cy="12" r="9"/><path d="m10 8.5 5 3.5-5 3.5z"/>',
+    'library': '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/><path d="M9 7h6"/>',
+    'qa': '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+    'editor': '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/>',
+    'backtest': '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+    'journal': '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="m9 12 2 2 4-4"/><path d="M9 7h6"/>',
+    'analytics': '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>',
+    'compare': '<path d="M7 4v16M7 4 3 8M7 4l4 4"/><path d="M17 20V4M17 20l-4-4M17 20l4-4"/>',
+    'integrations': '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>'} %}
+  {% set groups = [
+    ('Research', [('dashboard', '/', 'Dashboard'), ('sources', '/sources', 'Source Manager'), ('videos', '/videos', 'Video Library'), ('library', '/library', 'Strategy Library'), ('qa', '/qa', 'AI Trading Q&A'), ('media', '/media', 'Media')]),
+    ('Validate', [('editor', '/editor', 'Editor & Approval'), ('backtest', '/backtest', 'Backtesting Workspace'), ('journal', '/journal', 'Trade Journal'), ('analytics', '/analytics', 'Analytics'), ('compare', '/compare', 'Comparison')]),
+    ('System', [('integrations', '/integrations', 'Integrations & Settings')])] %}
+  {% set legacy = [
+    ('charts', '/charts', 'TradingView Charts'), ('playbook', '/playbook', 'Observed Playbook'), ('patterns', '/patterns', 'Strategy Patterns'), ('trades', '/trades', 'Extracted Trades'),
+    ('knowledge', '/knowledge', 'Knowledge Base'), ('processing', '/processing', 'Processing Pipeline'), ('backtesting', '/backtesting', 'Simple-rule Lab')] %}
   <div class="app-container">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo-badge">FX</div>
-        <div>
-          <div class="sidebar-title">Trader Intelligence</div>
-          <div class="sidebar-subtitle">Gemini Powered</div>
-        </div>
+    <aside class="sidebar" aria-label="Primary">
+      <div class="sidebar-header brand">
+        <a href="/" aria-label="Trader Intelligence - Research &amp; validation"><img src="/static/img/logo.png" alt="Trader Intelligence - Research &amp; validation" class="brand-logo"></a>
       </div>
-
       <nav class="sidebar-nav">
-        <a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-          Dashboard
+        {% for title, items in groups %}
+        <div class="nav-group">{{ title }}</div>
+        {% for key, href, label in items %}
+        <a href="{{ href }}" class="nav-link {% if active_page == key %}active{% endif %}" {% if active_page == key %}aria-current="page"{% endif %}>
+          <svg class="nav-ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icons[key]|safe }}</svg><span>{{ label }}</span>
         </a>
-        <a href="/videos" class="nav-link {% if active_page == 'videos' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
-          Videos
-        </a>
-        <a href="/playlists" class="nav-link {% if active_page == 'playlists' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></svg>
-          Playlists
-        </a>
-        <a href="/trades" class="nav-link {% if active_page == 'trades' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-          Extracted Trades
-        </a>
-        <a href="/charts" class="nav-link {% if active_page == 'charts' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/><circle cx="19" cy="9" r="2"/></svg>
-          TradingView Charts
-        </a>
-        <a href="/backtesting" class="nav-link {% if active_page == 'backtesting' %}active{% endif %}">Backtesting</a>
-        <a href="/playbook" class="nav-link {% if active_page == 'playbook' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
-          Observed Playbook
-        </a>
-        <a href="/patterns" class="nav-link {% if active_page == 'patterns' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m10 15 5-3-5-3v6Z"/></svg>
-          Strategy Patterns
-        </a>
-        <a href="/chat" class="nav-link {% if active_page == 'chat' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          RAG AI Chat
-        </a>
-        <a href="/knowledge" class="nav-link {% if active_page == 'knowledge' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-          Knowledge Base
-        </a>
-        <a href="/processing" class="nav-link {% if active_page == 'processing' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>
-          Processing Pipeline
-        </a>
-        <a href="/settings" class="nav-link {% if active_page == 'settings' %}active{% endif %}">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          Settings
-        </a>
+        {% endfor %}
+        {% endfor %}
+        <details class="nav-more" {% if active_page in ['charts','playbook','patterns','trades','knowledge','processing','backtesting'] %}open{% endif %}>
+          <summary class="nav-group">Research tools</summary>
+          {% for key, href, label in legacy %}<a href="{{ href }}" class="nav-link sub {% if active_page == key %}active{% endif %}" {% if active_page == key %}aria-current="page"{% endif %}><span>{{ label }}</span></a>{% endfor %}
+        </details>
       </nav>
-
       <div class="sidebar-footer">
         <div class="ai-status-card">
-          <div class="status-dot"></div>
+          <div class="status-dot {% if not runtime_ai_configured %}off{% endif %}"></div>
           <div>
-            <div style="font-weight: 600; color: #065f46;">Video Intelligence</div>
-            <div style="font-size: 0.68rem; color: #047857;">{% if runtime_ai_configured %}AI key configured{% else %}AI setup required{% endif %}</div>
+            <div class="ai-title">{% if runtime_ai_configured %}AI ready{% else %}AI not configured{% endif %}</div>
+            <div class="ai-sub">{% if runtime_ai_configured %}Video + chart analysis enabled{% else %}Set GEMINI_API_KEY{% endif %}</div>
           </div>
         </div>
       </div>
     </aside>
 
-    <!-- Main View -->
-    <main class="main-content">
+    <main class="main-content" id="main">
       <header class="top-bar">
         <div>
           <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
-          <p class="page-subtitle">{% block page_subtitle %}Observed Forex trading setups, execution rules & evidence{% endblock %}</p>
+          <p class="page-subtitle">{% block page_subtitle %}{% endblock %}</p>
         </div>
-        <div class="top-actions">
-          <button class="btn btn-primary" onclick="openIngestModal()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-            Ingest YouTube Video
-          </button>
+        <div class="top-actions row">
+          {% if current_user and auth_required %}<span class="user-chip" title="Signed in">{{ current_user.username }} <button class="icon-btn" id="logoutBtn" type="button">Sign out</button></span>{% endif %}
+          <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+          <button class="btn btn-primary" type="button" onclick="openIngestModal()">＋ Add source</button>
         </div>
       </header>
-
       <div class="content-body">
         {% block content %}{% endblock %}
       </div>
     </main>
   </div>
 
-  <!-- Ingest Modal -->
-  <div class="modal" id="ingestModal">
+  <div class="modal" id="ingestModal" role="dialog" aria-modal="true" aria-labelledby="ingestTitle">
     <div class="modal-content">
-      <h3 style="margin-bottom: 0.5rem; font-size: 1.2rem; color: var(--text-main);">Ingest YouTube Video</h3>
-      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.25rem;">
-        Paste a YouTube Video or Playlist URL. The pipeline will download, transcribe, detect trades, analyze chart frames with Gemini, and store verified trades.
-      </p>
-      <form onsubmit="handleIngestSubmit(event)">
-        <input
-          type="url"
-          id="youtubeUrlInput"
-          placeholder="https://www.youtube.com/watch?v=..."
-          required
-          style="width: 100%; padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid var(--border-subtle); background: #f8fafc; color: var(--text-main); margin-bottom: 1rem; outline: none;"
-        >
-        <div id="ingestStatus" style="font-size: 0.8rem; margin-bottom: 1rem;"></div>
-        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+      <h3 id="ingestTitle" style="margin-bottom:.4rem">Add a YouTube source</h3>
+      <p class="small muted" style="margin-bottom:1rem">Paste a video, playlist or channel link. Channels discover every accessible public video; coverage is reported honestly and never overstated.</p>
+      <form onsubmit="handleIngestSubmit(event)" class="stack">
+        <input class="input" type="url" id="youtubeUrlInput" placeholder="https://www.youtube.com/@channel  ·  /playlist?list=…  ·  /watch?v=…" required aria-label="YouTube URL">
+        <div id="ingestPreview"></div>
+        <div id="ingestStatus" class="small"></div>
+        <div class="row end">
           <button type="button" class="btn btn-secondary" onclick="closeIngestModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Start Analysis</button>
+          <button type="submit" class="btn btn-primary">Start analysis</button>
         </div>
       </form>
     </div>
   </div>
 
+  <script src="/static/js/ui.js"></script>
+  <script src="/static/js/viz.js"></script>
   <script src="/static/js/app.js"></script>
+  <script>window.openIngestModal = window.openIngestModal; </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

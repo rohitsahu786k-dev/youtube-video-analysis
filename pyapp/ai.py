@@ -8,6 +8,7 @@ from uuid import uuid4
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, ConfigDict
+from pyapp import budget
 from pyapp.config import settings
 from pyapp.db import db
 from pyapp.media import blocking_call
@@ -135,24 +136,38 @@ def get_client():
         raise RuntimeError("GEMINI_API_KEY is required for video analysis.")
     return genai.Client(api_key=settings.GEMINI_API_KEY, http_options=types.HttpOptions(timeout=180000))
 
-async def structured(model, prompt, schema, contents, video_id=None):
+NO_THINKING = types.ThinkingConfig(thinking_budget=0)
+
+
+def is_thinking_error(exc) -> bool:
+    return "thinking" in str(exc).lower()
+
+
+async def structured(model, prompt, schema, contents, video_id=None, kind="video", think=True):
+    """One schema-constrained Gemini call. `think=False` disables the model's hidden reasoning pass: it is billed as output and added ~8 s to chat answers.
+    Every call is recorded with its token cost (kind: video | qa-rewrite | ...)."""
     client = get_client()
     try:
+        use_thinking_config = not think
         for attempt in range(3):
             try:
+                await budget.require_available(kind, video_id)
+                extra = {"thinking_config": NO_THINKING} if use_thinking_config else {}
                 response = await client.aio.models.generate_content(model=model, contents=contents,
                     config=types.GenerateContentConfig(system_instruction=EVIDENCE + " " + prompt,
-                        response_mime_type="application/json", response_schema=schema, temperature=0))
+                        response_mime_type="application/json", response_schema=schema, temperature=0, **extra))
+                await budget.record(kind, model, response.usage_metadata, video_id)
                 if not response.text:
                     raise RuntimeError("Gemini returned no structured evidence. Check content filtering and response limits.")
                 result = schema.model_validate_json(response.text)
-                usage = response.usage_metadata
-                await db.save("usage", {"id": uuid4().hex, "videoId": video_id, "model": model,
-                    "promptTokens": getattr(usage, "prompt_token_count", 0) or 0,
-                    "outputTokens": getattr(usage, "candidates_token_count", 0) or 0,
-                    "totalTokens": getattr(usage, "total_token_count", 0) or 0})
                 return result.model_dump()
             except Exception as exc:
+                if budget.is_exhaustion_error(exc):
+                    await budget.mark_provider_exhausted(exc)
+                    raise
+                if use_thinking_config and is_thinking_error(exc):
+                    use_thinking_config = False            # this model does not accept a thinking budget; retry plainly
+                    continue
                 code = getattr(exc, "code", None)
                 if code not in (429, 500, 502, 503, 504) or attempt == 2:
                     raise
@@ -164,36 +179,52 @@ async def structured(model, prompt, schema, contents, video_id=None):
 async def semantic_events(segments, video_id=None):
     result = await structured(settings.GEMINI_ANALYSIS_MODEL,
         "Detect actual entry/exit, trade management, setup formation and teaching events. Retain the exact supporting spoken phrase. Do not call a hypothetical entry an actual trade.",
-        Events, json.dumps(segments), video_id)
+        Events, json.dumps(segments), video_id, kind="events")
     return result["events"]
 
 async def transcribe(audio_path, video_id=None):
     return await structured(settings.GEMINI_TRANSCRIBE_MODEL,
         "Transcribe accurately into timestamped phrases. Do not omit Hindi or English speech. Timestamps are relative to this audio chunk.",
-        Transcript, ["Transcribe audio", types.Part.from_bytes(data=Path(audio_path).read_bytes(), mime_type="audio/mp3")], video_id)
+        Transcript, ["Transcribe audio", types.Part.from_bytes(data=Path(audio_path).read_bytes(), mime_type="audio/mp3")], video_id, kind="transcribe", think=False)
 
-async def scan_video(video_path, duration, video_id):
+async def scan_video(video_path, duration, video_id, completed=None, checkpoint=None):
+    completed = completed if completed is not None else {}
+    starts = list(range(0, max(1, int(duration)), 600))
+    if all(str(start) in completed for start in starts):
+        return [event for start in starts for event in completed[str(start)]]
+    await budget.require_available("scan", video_id)
     # Inspect the full visual timeline as well as speech, including silent executions.
     client = get_client()
     uploaded = None
     try:
-        uploaded = await blocking_call(lambda: client.files.upload(file=video_path))
-        for _ in range(150):
-            if uploaded.state.name != "PROCESSING":
-                break
-            await asyncio.sleep(2)
-            uploaded = await blocking_call(lambda: client.files.get(name=uploaded.name))
+        try:
+            uploaded = await blocking_call(lambda: client.files.upload(file=video_path))
+            for _ in range(150):
+                if uploaded.state.name != "PROCESSING":
+                    break
+                await asyncio.sleep(2)
+                uploaded = await blocking_call(lambda: client.files.get(name=uploaded.name))
+        except Exception as exc:
+            if budget.is_exhaustion_error(exc):
+                await budget.mark_provider_exhausted(exc)
+            raise
         if uploaded.state.name != "ACTIVE":
             raise RuntimeError("Gemini video upload did not become ready.")
         events = []
-        for start in range(0, max(1, int(duration)), 600):
+        for start in starts:
+            if str(start) in completed:
+                events.extend(completed[str(start)])
+                continue
             end = min(duration, start + 600)
             part = types.Part(file_data=types.FileData(file_uri=uploaded.uri, mime_type=uploaded.mime_type),
                 video_metadata=types.VideoMetadata(start_offset=f"{start}s", end_offset=f"{end}s", fps=1))
             result = await structured(settings.GEMINI_ANALYSIS_MODEL,
                 f"Inspect visual AND audio evidence in this video interval [{start}, {end}] seconds. Find executed trades, position/order changes, exits and clearly taught rules even without speech. Chart position tools alone are hypothetical, not proof of execution. Return absolute timestamps from the full video, not relative clip offsets.",
-                Events, ["Find trade and teaching events", part], video_id)
-            events.extend(e for e in result["events"] if start <= e["timestamp"] <= end)
+                Events, ["Find trade and teaching events", part], video_id, kind="scan")
+            completed[str(start)] = [event for event in result["events"] if start <= event["timestamp"] <= end]
+            if checkpoint:
+                await checkpoint()
+            events.extend(completed[str(start)])
         return events
     finally:
         if uploaded:
@@ -212,17 +243,17 @@ async def analyze_frames(frames, context, video_id=None):
         path = Path(frame["path"])
         contents.append(types.Part.from_bytes(data=path.read_bytes(), mime_type=mimetypes.guess_type(path.name)[0] or "image/webp"))
     return await structured(settings.GEMINI_ANALYSIS_MODEL,
-        "Read these timestamped chart frames. Describe visible symbol, timeframe, orders, fills, positions, price, stop and target. executionVisible is true only for a visible filled order or actual position, never just a drawing. If blurry or ambiguous mark uncertainty.", Visual, contents, video_id)
+        "Read these timestamped chart frames. Describe visible symbol, timeframe, orders, fills, positions, price, stop and target. executionVisible is true only for a visible filled order or actual position, never just a drawing. If blurry or ambiguous mark uncertainty.", Visual, contents, video_id, kind="frames")
 
 async def extract_trades(video_id, transcript_evidence, visual_evidence):
     return (await structured(settings.GEMINI_REASONING_MODEL,
         "Extract ALL distinct executed trades supported by this event window; merge management of the same entry. Exact prices require visible support. fieldEvidence maps each supplied field to its supporting timestamp and visible/spoken observation. executionEvidence must identify a filled order or actual position, not a drawing. executionMode must distinguish LIVE broker trading, PAPER demo account, REPLAY historical backtesting/simulator, and UNKNOWN. LIVE requires explicit supporting broker/account evidence. Replay wins are not live profits. No fabricated session, outcome or price. Return an empty list if there is no executed trade.",
-        Trades, evidence_contents({"transcript": transcript_evidence, "visual": visual_evidence}, visual_evidence), video_id))["trades"]
+        Trades, evidence_contents({"transcript": transcript_evidence, "visual": visual_evidence}, visual_evidence), video_id, kind="trades"))["trades"]
 
 async def validate_trade(trade, transcript_evidence, visual_evidence, video_id=None):
     return await structured(settings.GEMINI_REASONING_MODEL,
         "Skeptically validate this trade. VALID requires actual execution support, a supported symbol/direction/entry timestamp and agreement between transcript and visuals. A drawing is not an execution. List unsupportedFields using the extraction field names. Exact prices and outcomes must have evidence; unreadable prices must be null. Conflicting evidence is UNCERTAIN.",
-        Validation, evidence_contents({"trade": trade, "transcript": transcript_evidence, "visual": visual_evidence}, visual_evidence), video_id)
+        Validation, evidence_contents({"trade": trade, "transcript": transcript_evidence, "visual": visual_evidence}, visual_evidence), video_id, kind="trades")
 
 def evidence_contents(payload, visual):
     contents = [json.dumps(payload)]
@@ -234,16 +265,23 @@ def evidence_contents(payload, visual):
 async def extract_lessons(segments, visual, video_id):
     return (await structured(settings.GEMINI_REASONING_MODEL,
         "Extract teaching rules, entry/exit criteria, risk policies and contradictions into short evidence-linked lessons. Preserve the expert's actual rules and caveats. Never promote an inference to a spoken rule. For a concrete entry setup only, set strategyTag to a short consistent canonical setup name (e.g. liquidity-sweep-rejection). For generic advice or risk policies leave strategyTag null. Only supply symbol, timeframe and direction when explicitly supported; otherwise null.",
-        Lessons, json.dumps({"segments": segments, "visual": visual}), video_id))["lessons"]
+        Lessons, json.dumps({"segments": segments, "visual": visual}), video_id, kind="lessons"))["lessons"]
 
 async def answer_rag(question, evidence):
     if not evidence:
         return "No matching analyzed-video evidence is available. Process a playlist or ask about a topic present in the knowledge base."
     client = get_client()
     try:
-        response = await client.aio.models.generate_content(model=settings.GEMINI_FINAL_MODEL,
-            contents=json.dumps({"question": question, "evidence": evidence}),
-            config=types.GenerateContentConfig(system_instruction=EVIDENCE + " Answer only from supplied evidence. Cite source ids and video timestamps. Say when evidence is insufficient. Observed win rate is not a forecast. Never give an invented live market price.", temperature=0))
+        await budget.require_available("qa")
+        try:
+            response = await client.aio.models.generate_content(model=settings.GEMINI_FINAL_MODEL,
+                contents=json.dumps({"question": question, "evidence": evidence}),
+                config=types.GenerateContentConfig(system_instruction=EVIDENCE + " Answer only from supplied evidence. Cite source ids and video timestamps. Say when evidence is insufficient. Observed win rate is not a forecast. Never give an invented live market price.", temperature=0))
+        except Exception as exc:
+            if budget.is_exhaustion_error(exc):
+                await budget.mark_provider_exhausted(exc)
+            raise
+        await budget.record("qa", settings.GEMINI_FINAL_MODEL, response.usage_metadata)
         return response.text or "No answer returned."
     finally:
         await client.aio.aclose()

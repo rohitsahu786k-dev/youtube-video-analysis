@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Integrations &amp; Settings · Trader Video Intelligence{% endblock %}
+{% block page_title %}Integrations &amp; Settings{% endblock %}
+{% block page_subtitle %}Market data, Google Sheets, TradingView workflows, accounts and operations{% endblock %}
+{% block content %}
+<div class="grid cols-3" id="health"><div class="skeleton" style="height:120px"></div></div>
+
+<div class="grid cols-2">
+  <div class="card"><div class="card-title">Market data providers</div>
+    <table><tbody>
+      <tr><td><strong>CSV upload</strong></td><td class="small">Any licensed vendor (Dukascopy, broker exports, MT4/MT5, TradingView exports). Timezone and calendar are declared explicitly; repairs are disclosed.</td></tr>
+      <tr><td><strong>OANDA</strong></td><td class="small">{% if oanda %}<span class="pill ok">configured ({{ oanda_env }})</span>{% else %}<span class="pill warn">not configured</span> set <code>OANDA_API_TOKEN</code> &amp; <code>OANDA_ACCOUNT_ID</code>{% endif %} — years of forex/metals history with bid/ask spreads per bar.</td></tr>
+      <tr><td><strong>Binance</strong></td><td class="small"><span class="pill ok">no key needed</span> public crypto klines from <span class="mono">{{ binance_url }}</span> (last-trade prices).</td></tr>
+    </tbody></table>
+    <p class="small muted">Providers are swappable modules. Stored data records its provider, licence note, timezone assumption and SHA-256. You are responsible for holding a licence that covers your use.</p></div>
+
+  <div class="card"><div class="card-title">Google Sheets</div><div id="google"><div class="skeleton" style="height:70px"></div></div>
+    <details style="margin-top:.6rem"><summary class="small"><strong>One-time setup</strong></summary><ol class="small steps" style="margin-top:.5rem">
+      <li>Google Cloud Console → create a project → enable <em>Google Sheets API</em>.</li><li>OAuth consent screen (External, add yourself as a test user) → Credentials → <em>OAuth client ID → Web application</em>.</li>
+      <li>Authorised redirect URI: <span class="mono" id="redir"></span></li><li>Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code>, restart, then click Connect.</li></ol></details>
+    <p class="small muted">Requested scope: <span class="mono">spreadsheets</span>. Refresh tokens are stored encrypted. Exports upsert rows by Trade ID.</p></div>
+
+  <div class="card"><div class="card-title">TradingView</div>
+    <p class="small"><strong>Workflow A — native testing:</strong> generate Pine Script from an approved version (Strategy Editor or a run's “Pine &amp; TradingView” tab), test it in TradingView's Strategy Tester, export the list of trades and compare it here.</p>
+    <p class="small"><strong>Workflow B — independent engine:</strong> the Backtesting Workspace runs the same rules on licensed data, fully automatically, and labels every result with its engine and assumptions.</p>
+    <p class="small muted">There is no remote control of TradingView's Strategy Tester: it has no official API, and scraping or credential sharing is deliberately not implemented. <a href="/charts">TradingView chart view</a> is display-only.</p></div>
+
+  <div class="card"><div class="card-title">AI models</div><table><tbody>{% for k, v in models.items() %}<tr><td class="muted">{{ k }}</td><td class="mono small">{{ v }}</td></tr>{% endfor %}</tbody></table>
+    <div class="row" style="margin-top:.6rem"><button class="btn sm ghost" id="chk">Check model access</button><span class="small" id="chkOut"></span></div>
+    <p class="small muted">Journal timezone default: {{ display_tz }} (daylight-saving aware via the IANA database).</p></div>
+</div>
+
+<div class="card"><div class="card-title">AI usage &amp; server capacity</div><div id="usageBox"><div class="skeleton" style="height:90px"></div></div>
+  <p class="small muted">Backtesting costs no AI credit (it only uses server CPU). Video analysis and chat answers do. Spend is estimated from token counts and Google's published prices;
+  set <span class="mono">AI_DAILY_BUDGET_USD</span> / <span class="mono">AI_DAILY_QUESTIONS</span> in the server settings to change the daily caps.</p></div>
+
+<div class="grid cols-2">
+  <div class="card"><div class="card-title">Account</div>
+    <form id="pwForm" class="stack"><label class="field">Current password<input type="password" id="pwCur" autocomplete="current-password" required></label><label class="field">New password (10+ characters)<input type="password" id="pwNew" autocomplete="new-password" required minlength="10"></label><button class="btn btn-secondary" type="submit">Change password</button></form>
+    <p class="small muted" id="authNote"></p></div>
+  <div class="card" id="usersCard" style="display:none"><div class="card-title">Users <span class="small muted" style="font-weight:400">(administrator)</span></div><div id="users"></div>
+    <form id="userForm" class="row" style="margin-top:.7rem"><input class="input" id="uName" placeholder="username" style="width:140px" required><input class="input" id="uPass" type="password" placeholder="password (10+)" style="width:160px" required><select class="input" id="uRole" style="width:100px"><option>user</option><option>admin</option></select><button class="btn sm btn-secondary" type="submit">Add user</button></form>
+    <p class="small muted">Each user's sources, strategies, runs, journals and chats are private to them.</p></div>
+  <div class="card" id="opsCard" style="display:none"><div class="card-title">Operations <span class="small muted" style="font-weight:400">(administrator)</span></div><div id="sys" class="small"></div>
+    <div class="row" style="margin-top:.6rem"><a class="btn btn-secondary sm" href="/api/admin/backup">Download backup (database + market data)</a></div>
+    <p class="small muted">Back up <span class="mono">storage/evidence</span> (chart frames) separately. See docs/deployment.md for scheduled backups and restore.</p></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+async function health() {
+  const h = await UI.api("/api/health"), s = h.services, tile = (name, ok, text) => `<div class="card"><div class="row between"><strong>${name}</strong><span class="pill ${ok ? "ok" : "warn"}">${ok ? "ready" : "attention"}</span></div><p class="small muted" style="margin:.4rem 0 0">${text}</p></div>`;
+  $("health").innerHTML = tile("Database", s.database, "SQLite, WAL mode, per-user namespaces") + tile("AI (Gemini)", s.gemini, s.gemini ? "Key configured" : "Set GEMINI_API_KEY") + tile("FFmpeg", s.ffmpeg, s.ffmpeg ? "Frame, audio and scene extraction available" : "Install FFmpeg or set FFMPEG_PATH") + tile("Background worker", s.workerEnabled, s.workerEnabled ? "Processing queue running" : "ENABLE_WORKER=false") + tile("Live market feed (OANDA)", s.liveMarketData, "Read-only quotes for the legacy paper-signal view");
+}
+async function usage() {
+  const u = await UI.api("/api/usage/summary"), p = u.periods, kinds = Object.entries(u.byKind).map(([k, v]) => `<tr><td class="muted">${UI.esc(k)}</td><td>${v.calls} calls</td><td>$${v.costUsd.toFixed(3)}</td></tr>`).join("");
+  const cap = u.budget.dailyUsd ? ` of $${u.budget.dailyUsd.toFixed(2)}` : "", q = u.budget.dailyQuestions ? ` of ${u.budget.dailyQuestions}` : "";
+  $("usageBox").innerHTML = (u.today.blocked ? `<div class="banner warn" style="margin:0 0 .6rem">${UI.esc(u.today.blocked)}</div>` : "") + (u.storageProblem ? `<div class="banner warn" style="margin:0 0 .6rem">${UI.esc(u.storageProblem)}</div>` : "") +
+    `<div class="grid cols-3"><div><div class="small muted">Today</div><strong>$${u.today.costUsd.toFixed(3)}</strong>${cap}<div class="small muted">${u.today.questions}${q} chat answers</div></div>
+     <div><div class="small muted">Last 7 days</div><strong>$${p["7d"].costUsd.toFixed(2)}</strong><div class="small muted">${p["7d"].calls} model calls</div></div>
+     <div><div class="small muted">Last 30 days</div><strong>$${p["30d"].costUsd.toFixed(2)}</strong><div class="small muted">${p["30d"].calls} model calls</div></div></div>` +
+    (kinds ? `<table style="margin-top:.6rem"><tbody>${kinds}</tbody></table>` : "") +
+    `<div class="small muted" style="margin-top:.5rem">Disk free: ${(u.storage.freeMb / 1024).toFixed(1)} GB${u.storage.freeInodePct != null ? " · inodes free: " + u.storage.freeInodePct + "%" : ""}</div>`;
+}
+async function google() {
+  const g = await UI.api("/api/google/status"); $("redir").textContent = g.redirectUri;
+  $("google").innerHTML = !g.configured ? '<div class="banner warn" style="margin:0">Not configured on this server.</div>' : g.connected ? '<span class="pill ok">connected</span> <button class="btn sm ghost" id="gOff">Disconnect</button>' : '<button class="btn btn-primary sm" id="gOn">Connect Google Sheets</button>';
+  $("gOn")?.addEventListener("click", async () => { try { const r = await UI.api("/api/google/connect"); location.href = r.url; } catch (e) { UI.toast(e.message, "bad"); } });
+  $("gOff")?.addEventListener("click", async () => { await UI.api("/api/google/disconnect", { method: "POST" }); google(); });
+  const q = new URLSearchParams(location.search).get("google"); if (q) UI.toast(q === "connected" ? "Google Sheets connected" : "Google connection " + q, q === "connected" ? "ok" : "bad");
+}
+async function admin() {
+  const me = await UI.api("/api/auth/me");
+  $("authNote").textContent = me.authRequired ? `Signed in as ${me.user.username} (${me.user.role}).` : "Authentication is disabled (local use). Set ADMIN_PASSWORD before exposing this app to the internet.";
+  if (!me.authRequired || me.user.role !== "admin") { if (!me.authRequired) $("pwForm").style.display = "none"; return; }
+  $("usersCard").style.display = $("opsCard").style.display = "";
+  const users = await UI.api("/api/users"); $("users").innerHTML = `<table><tbody>${users.map(u => `<tr><td>${UI.esc(u.username)} <span class="pill">${u.role}</span> ${u.disabled ? '<span class="pill bad">disabled</span>' : ""}</td><td class="num">${u.id !== me.user.id ? `<button class="btn sm ghost" data-dis="${u.id}">${u.disabled ? "Enable" : "Disable"}</button>` : ""}</td></tr>`).join("")}</tbody></table>`;
+  $("users").querySelectorAll("[data-dis]").forEach(b => b.onclick = async () => { await UI.api(`/api/users/${b.dataset.dis}/disable`, { method: "POST" }); admin(); });
+  const sys = await UI.api("/api/admin/system"); $("sys").innerHTML = `Disk free ${sys.diskFreeGb} GB of ${sys.diskTotalGb} GB · ${sys.owners.length} workspace(s) · environment ${sys.env}`;
+}
+$("pwForm").addEventListener("submit", async (e) => { e.preventDefault(); try { await UI.api("/api/auth/password", { json: { current: $("pwCur").value, new: $("pwNew").value } }); UI.toast("Password changed", "ok"); e.target.reset(); } catch (err) { UI.toast(err.message, "bad"); } });
+$("userForm").addEventListener("submit", async (e) => { e.preventDefault(); try { await UI.api("/api/users", { json: { username: $("uName").value, password: $("uPass").value, role: $("uRole").value } }); UI.toast("User created", "ok"); e.target.reset(); admin(); } catch (err) { UI.toast(err.message, "bad"); } });
+$("chk").addEventListener("click", async () => { $("chkOut").textContent = "Checking…"; try { const r = await UI.api("/api/health/gemini"); $("chkOut").textContent = r.status === "ok" ? "All configured models are reachable (quota is not checked)." : r.status; } catch (e) { $("chkOut").textContent = e.message; } });
+health(); usage().catch(() => { $("usageBox").textContent = "Usage is unavailable."; }); google(); admin();
+</script>
+{% endblock %}

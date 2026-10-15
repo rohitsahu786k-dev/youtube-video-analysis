@@ -23,13 +23,25 @@ async def blocking_call(function, *args):
             pass
         raise
 
-# Ensure installed ffmpeg is discovered in PATH
-for p in [
-    r"C:\Users\rohit.sahu\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.2-full_build\bin",
-    r"C:\Program Files\ffmpeg\bin"
-]:
+# FFmpeg is located through PATH, FFMPEG_PATH or the WinGet install directory (see MediaProcessor.ffmpeg).
+for p in [r"C:\Program Filesfmpegin"]:
     if os.path.exists(p) and p not in os.environ.get("PATH", ""):
         os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
+
+
+def classify_download_error(exc):
+    """Map a yt-dlp/ffmpeg failure to an explicit processing state (SRS 2.2)."""
+    text = str(exc).lower()
+    if any(k in text for k in ("sign in to confirm", "confirm your age", "age-restricted", "age restricted", "members-only", "members only", "join this channel",
+                               "login required", "requires payment", "not a bot", "use --cookies", "cookies")):
+        return "AWAITING_PERMISSION", "Access needs authorization (sign-in, age or membership restriction). Provide a cookies file for an account you are authorized to use, or upload the media/transcript."
+    if any(k in text for k in ("private video", "video unavailable", "this video is not available", "has been removed", "account associated", "terminated", "deleted",
+                               "blocked it in your country", "not available in your country", "copyright", "no longer available", "does not exist")):
+        return "UNAVAILABLE", "The video is private, removed or blocked and cannot be accessed. Upload authorized media or a transcript to analyse it."
+    if any(k in text for k in ("http error 429", "too many requests", "timed out", "timeout", "temporary failure", "connection reset", "http error 5", "network is unreachable", "unable to download")):
+        return "TRANSIENT", str(exc)[:300]
+    return "FAILED", str(exc)[:500]
+
 
 class MediaProcessor:
     def __init__(self, storage_path: str = settings.STORAGE_PATH):
@@ -40,11 +52,23 @@ class MediaProcessor:
         return {name: {"path": executable} for name in ("deno", "node") if (executable := shutil.which(name))}
 
     def dimensions(self, source):
-        ffmpeg = Path(self.ffmpeg())
-        probe = ffmpeg.with_name("ffprobe.exe" if ffmpeg.suffix == ".exe" else "ffprobe")
+        probe = self._probe()
         result = subprocess.run([str(probe), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", source], capture_output=True, text=True, check=True, timeout=30)
         import json
         return json.loads(result.stdout)["streams"][0]
+
+    def _probe(self):
+        ffmpeg = Path(self.ffmpeg())
+        return str(ffmpeg.with_name("ffprobe.exe" if ffmpeg.suffix == ".exe" else "ffprobe"))
+
+    def has_video_stream(self, source):
+        result = subprocess.run([self._probe(), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_type", "-of", "csv=p=0", source],
+                                capture_output=True, text=True, timeout=60)
+        return "video" in result.stdout
+
+    def media_duration(self, source):
+        result = subprocess.run([self._probe(), "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", source], capture_output=True, text=True, timeout=60)
+        return float(result.stdout.strip() or 0)
 
     def ffmpeg(self):
         if settings.FFMPEG_PATH:
@@ -71,14 +95,15 @@ class MediaProcessor:
             chunks.append({"path": str(path), "offset": start})
         return chunks
 
-    def get_info(self, url: str, playlist: bool = False) -> Dict[str, Any]:
+    def get_info(self, url: str, playlist: bool = False, limit: int | None = None) -> Dict[str, Any]:
+        limit = limit or settings.MAX_PLAYLIST_VIDEOS
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
             "extract_flat": "in_playlist" if playlist else False,
             "noplaylist": not playlist,
-            "playlistend": settings.MAX_PLAYLIST_VIDEOS + 1,
+            "playlistend": limit + 1,
             "socket_timeout": 30,
             "retries": 3,
             "cookiefile": settings.YTDLP_COOKIES_PATH,
@@ -87,17 +112,27 @@ class MediaProcessor:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             if "entries" in info:
-                # Playlist
-                entries = list(info.get("entries", []))
-                if len(entries) > settings.MAX_PLAYLIST_VIDEOS:
-                    raise ValueError(f"Playlist exceeds the configured limit ({settings.MAX_PLAYLIST_VIDEOS}).")
+                entries = [e for e in info.get("entries", []) if e]
+                nested = [e for e in entries if e.get("_type") == "playlist" and not e.get("duration")]
+                if nested and len(nested) == len(entries):
+                    # A channel root lists tabs; walk the video-bearing ones.
+                    flat = []
+                    for tab in nested:
+                        title = (tab.get("title") or "").lower()
+                        if any(k in title for k in ("videos", "live", "streams")) or not title:
+                            flat.extend(e for e in tab.get("entries", []) if e)
+                    entries = flat
+                truncated = len(entries) > limit
+                entries = entries[:limit]
                 first = entries[0] if entries else {}
                 return {
                     "isPlaylist": True,
                     "playlistId": info.get("id"),
                     "title": info.get("title", "YouTube Playlist"),
                     "videoCount": len(entries),
-                    "channel": info.get("uploader") or info.get("channel"),
+                    "truncated": truncated,
+                    "channel": info.get("uploader") or info.get("channel") or first.get("channel") or first.get("uploader"),
+                    "channelId": info.get("channel_id") or info.get("uploader_id"),
                     "videos": [
                         {
                             "id": f"vid-{e.get('id')}",
@@ -105,8 +140,11 @@ class MediaProcessor:
                             "title": e.get("title"),
                             "duration": e.get("duration") or 0,
                             "thumbnail": e.get("thumbnail"),
+                            "availability": e.get("availability"),
+                            "uploadDate": e.get("upload_date"),
+                            "description": (e.get("description") or "")[:600],
                         }
-                        for e in entries if e
+                        for e in entries if e.get("id")
                     ]
                 }
             return {
@@ -115,10 +153,13 @@ class MediaProcessor:
                 "youtubeId": info.get("id"),
                 "title": info.get("title", "YouTube Video"),
                 "channel": info.get("uploader") or info.get("channel", "Unknown Channel"),
+                "channelId": info.get("channel_id"),
                 "duration": info.get("duration", 0),
                 "thumbnail": info.get("thumbnail", f"https://i.ytimg.com/vi/{info.get('id')}/hqdefault.jpg"),
-                "description": (info.get("description") or "")[:2000],
+                "description": (info.get("description") or "")[:4000],
                 "uploadDate": info.get("upload_date"),
+                "liveStatus": info.get("live_status"),
+                "availability": info.get("availability"),
             }
 
     def download_video(self, url: str, video_id: str) -> str:
@@ -178,6 +219,14 @@ class MediaProcessor:
         ]
         subprocess.run(cmd, check=True, timeout=120)
         return out_frame
+
+    def scene_changes(self, video_path: str, threshold: float = 0.30, limit: int = 4000) -> list:
+        """Timestamps where the picture changes materially (chart redraws, new zones, slide changes)."""
+        import re
+        command = [self.ffmpeg(), "-hide_banner", "-nostats", "-i", video_path, "-an", "-vf", f"scale=320:-2,select=gt(scene\\,{threshold}),showinfo", "-f", "null", "-"]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=3600)
+        times = [float(m.group(1)) for m in re.finditer(r"pts_time:([0-9.]+)", result.stderr)]
+        return sorted(set(round(t, 2) for t in times))[:limit]
 
     def perceptual_hash(self, image_path: str) -> str:
         with Image.open(image_path) as img:

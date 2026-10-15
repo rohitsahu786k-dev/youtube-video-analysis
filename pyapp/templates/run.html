@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}{{ run.strategyName }} {{ run.strategyVersion }} · Backtest {{ run.id[:8] }}{% endblock %}
+{% block page_title %}{{ run.label or run.strategyName }} <span class="muted" style="font-weight:400">{{ run.strategyVersion }}</span>{% endblock %}
+{% block page_subtitle %}{{ run.symbol }} · {{ run.timeframe }} · {{ run.dataRange.firstBar[:10] }} → {{ run.dataRange.lastBar[:10] }} · {{ run.tradeCount }} trades · engine {{ run.engine }} {{ run.engineVersion }}{% endblock %}
+
+{% block content %}
+{% if run.status != 'VALID' %}<div class="banner bad"><strong>This run FAILED validation and must not be relied upon.</strong> {% for c in run.validation.checks if c.status == 'FAIL' %}{{ c.name }}{{ '; ' if not loop.last }}{% endfor %} Exports and sharing are blocked.</div>{% endif %}
+{% if run.fidelityNote %}<div class="banner {{ 'info' if run.fidelity == 'USER_AUTHORED_RULES' else 'warn' }}"><strong>Fidelity:</strong> {{ run.fidelityNote }}{% if run.unsupportedConcepts %} Not reproduced: {{ run.unsupportedConcepts|join('; ') }}.{% endif %}</div>{% endif %}
+{% if run.fidelity == 'FAITHFUL_TO_INSTRUCTOR' %}<div class="banner ok">Every material rule in this version is source-confirmed. This is a faithful historical test of the extracted rules — still a <em>retrospective</em> simulation, not verified instructor performance.</div>{% endif %}
+{% if run.dataQuality.unexpectedGapCount %}<div class="banner warn"><strong>Data gaps:</strong> {{ run.dataGapDisclosure }}</div>{% endif %}
+{% if run.ambiguity.trades %}<div class="banner warn"><strong>{{ run.ambiguity.trades }} ambiguous candle(s):</strong> stop and target both fell inside one bar (policy: {{ run.ambiguity.policy }}). Net P&amp;L as accounted {{ run.ambiguity.netPnlAsAccounted }}; if all resolved favourably {{ run.ambiguity.netPnlIfFavourable }}.</div>{% endif %}
+
+<div class="row end" style="margin:-.4rem 0 .8rem"><button class="btn sm ghost" id="renameRun">Rename / add note</button><button class="btn sm ghost" id="deleteRun">Delete run</button></div>
+<div class="tabs" data-tabs="#panes" data-hash="1" role="tablist">
+  <button class="tab active" data-tab="overview">Overview &amp; analytics</button><button class="tab" data-tab="journal">Trade journal</button><button class="tab" data-tab="segments">Segments</button>
+  <button class="tab" data-tab="validation">Validation &amp; audit</button><button class="tab" data-tab="pine">Pine &amp; TradingView</button><button class="tab" data-tab="export">Export</button>
+</div>
+
+<div id="panes">
+<div class="tab-panel active" id="overview">
+  <div class="kpis" id="kpis"></div>
+  <div class="grid cols-2">
+    <div class="card"><div class="card-title">Equity curve <span class="small muted" style="font-weight:400">mark-to-market</span></div><div class="chart" id="cEquity"></div></div>
+    <div class="card"><div class="card-title">Drawdown %</div><div class="chart" id="cDd"></div></div>
+    <div class="card"><div class="card-title">Monthly net P&amp;L</div><div class="chart" id="cMonthly"></div></div>
+    <div class="card"><div class="card-title">Cumulative net profit by trade</div><div class="chart" id="cCum"></div></div>
+    <div class="card"><div class="card-title">P&amp;L distribution</div><div class="chart" id="cPnlHist"></div></div>
+    <div class="card"><div class="card-title">R-multiple distribution</div><div class="chart" id="cRHist"></div></div>
+    <div class="card"><div class="card-title">Net P&amp;L by session</div><div class="chart" id="cSession"></div></div>
+    <div class="card"><div class="card-title">Net P&amp;L by weekday</div><div class="chart" id="cWeekday"></div></div>
+  </div>
+  <div class="grid cols-2">
+    <div class="card"><div class="card-title">How costs affect profitability</div><div id="costs"></div></div>
+    <div class="card"><div class="card-title">Samples &amp; periods</div><div id="periods"></div></div>
+  </div>
+  <p class="small muted">Historical simulation only. Past performance does not guarantee future results, and results from an approximation of intrabar fills carry uncertainty. {{ run.limitations }}</p>
+</div>
+
+<div class="tab-panel" id="journal">
+  <div class="card">
+    <div class="row between"><div class="row">
+      <select class="input" id="fDir" style="width:130px" aria-label="Direction"><option value="">Long &amp; short</option><option>LONG</option><option>SHORT</option></select>
+      <select class="input" id="fRes" style="width:130px" aria-label="Result"><option value="">All results</option><option>WIN</option><option>LOSS</option><option>BREAKEVEN</option></select>
+      <select class="input" id="fSes" style="width:170px" aria-label="Session"><option value="">All sessions</option></select>
+      <input class="input" id="fQ" style="width:200px" placeholder="Search notes / setup" aria-label="Search"></div>
+      <span class="small muted" id="jCount"></span></div>
+  </div>
+  <div class="card flush"><div class="table-responsive" style="max-height:640px;overflow:auto"><table id="jTable" data-sortable><thead><tr>
+    <th data-sort>#</th><th data-sort>Entry (<span class="tzl"></span>)</th><th data-sort>Dir</th><th data-sort>Session</th><th class="num" data-sort>Entry</th><th class="num" data-sort>SL</th><th class="num" data-sort>TP</th><th class="num" data-sort>Qty</th><th class="num" data-sort>Risk</th><th class="num" data-sort>R:R</th>
+    <th class="num" data-sort>Exit</th><th data-sort>Reason</th><th class="num" data-sort>Gross</th><th class="num" data-sort>Fees</th><th class="num" data-sort>Net</th><th class="num" data-sort>R</th><th data-sort>Result</th><th data-sort>Held</th></tr></thead><tbody></tbody></table></div></div>
+  <p class="small muted">Every simulated trade is one row. Click a row for the chart, plain-language explanation, management steps and the event log.</p>
+</div>
+
+<div class="tab-panel" id="segments">
+  <div class="card"><div class="row"><label class="field" style="max-width:240px">Segment by<select id="segSel"><option value="instrument">Instrument</option><option value="direction">Direction</option><option value="session">Session</option><option value="hour">Hour of day</option><option value="weekday">Weekday</option><option value="month">Month</option><option value="setup">Setup variation</option><option value="regime">Market regime</option><option value="rrCategory">Planned R:R</option><option value="exitReason">Exit reason</option></select></label><span class="small muted" id="segNote"></span></div>
+    <div class="chart" id="cSeg" style="margin:1rem 0"></div><div class="table-responsive"><table id="segTable" data-sortable><thead><tr><th data-sort>Segment</th><th class="num" data-sort>Trades</th><th class="num" data-sort>Win rate</th><th class="num" data-sort>Net P&amp;L</th><th class="num" data-sort>Profit factor</th><th class="num" data-sort>Expectancy R</th><th class="num" data-sort>Costs</th></tr></thead><tbody></tbody></table></div>
+    <p class="small muted">Small segments are noisy: compare trade counts before reading anything into a difference. Historical performance never guarantees future outcomes.</p></div>
+</div>
+
+<div class="tab-panel" id="validation"><div id="valBody"></div></div>
+
+<div class="tab-panel" id="pine">
+  <div class="grid cols-2">
+    <div class="card"><div class="card-title">Workflow A — test natively on TradingView</div>
+      <ol class="steps small"><li>Generate the Pine Script for this exact approved rule set.</li><li>Paste it into the Pine Editor, compile and add to chart (same symbol, timeframe and period).</li><li>Open Strategy Tester → List of trades → export CSV.</li><li>Upload that CSV below to compare with this independent engine.</li></ol>
+      <button class="btn btn-secondary" id="genPine">Generate Pine Script</button>
+      <p class="small muted" style="margin-top:.6rem">No TradingView API is called; nothing is scraped. TradingView's own terms apply to its data and tools.</p></div>
+    <div class="card"><div class="card-title">Compare with a TradingView export</div>
+      <form id="tvForm" class="stack"><label class="field">Strategy Tester “List of trades” (.csv)<input type="file" name="file" accept=".csv" required></label>
+        <div class="form-grid"><label class="field">Chart timezone<input name="tz" value="UTC"><span class="hint">Timezone shown in your TradingView export (the chart's setting).</span></label><label class="field">Entry-time tolerance (bars)<input name="time_tolerance_bars" type="number" min="0" max="10" value="1"></label></div>
+        <button class="btn btn-primary" type="submit">Compare</button></form></div>
+  </div>
+  <div id="tvResult"></div>
+</div>
+
+<div class="tab-panel" id="export">
+  <div class="grid cols-2">
+    <div class="card"><div class="card-title">Download</div>
+      {% if run.status == 'VALID' %}<div class="row"><a class="btn btn-primary" href="/api/runs/{{ run.id }}/export.xlsx">Excel (.xlsx) — 5 sheets</a><a class="btn btn-secondary" href="/api/runs/{{ run.id }}/export.csv">CSV — trade journal</a></div>
+      <p class="small muted" style="margin-top:.6rem">Workbook sheets: Trade Journal · Performance Summary · Strategy Rules · Backtest Configuration · Validation &amp; Exceptions. Totals are live formulas that reconcile with the trade rows.</p>
+      {% else %}<div class="banner bad">Exports are blocked for runs that failed validation.</div>{% endif %}</div>
+    <div class="card"><div class="card-title">Google Sheets</div><div id="gStatus" class="small muted">Checking connection…</div>
+      <form id="gForm" class="stack" style="margin-top:.6rem"><label class="field">Existing spreadsheet URL (optional — blank creates a new one)<input id="gUrl" class="input" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
+        <label class="field">Title for a new spreadsheet<input id="gTitle" class="input" value="{{ run.strategyName }} · {{ run.symbol }} {{ run.timeframe }} journal"></label>
+        <button class="btn btn-primary" type="submit" id="gBtn" {% if run.status != 'VALID' %}disabled{% endif %}>Export to Google Sheets</button></form>
+      <p class="small muted" style="margin-top:.5rem">Rows are keyed by Trade ID: exporting again updates existing rows and appends new ones — never duplicates.</p><div id="gResult"></div></div>
+  </div>
+</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const RUN = {{ run.id|tojson }}, $ = (id) => document.getElementById(id);
+let run = null, rows = [];
+const money = (v) => UI.money(v), ccy = {{ run.accountCurrency|tojson }};
+
+function kpi(label, value, sub = "", cls = "") { return `<div class="kpi"><div class="label">${label}</div><div class="value ${cls}">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`; }
+function overview() {
+  const m = run.metrics;
+  $("kpis").innerHTML = [kpi("Net P&L", money(m.netPnl) + " " + ccy, `${UI.pct(m.totalReturnPct, 2)} on ${UI.money(run.initialCapital)}`, UI.cls(m.netPnl)), kpi("Win rate", UI.pct(m.winRate), `${m.wins}W · ${m.losses}L · ${m.breakeven}BE`), kpi("Profit factor", UI.num(m.profitFactor), `payoff ${UI.num(m.payoffRatio)}`),
+    kpi("Expectancy", UI.num(m.expectancyR, 3) + " R", money(m.expectancy) + " / trade"), kpi("Max drawdown", UI.pct(m.maxDrawdownPct, 2), money(m.maxDrawdown) + " mark-to-market", "neg"), kpi("Trades", m.totalTrades, m.openAtEnd ? `${m.openAtEnd} open at end (excluded)` : `avg hold ${UI.num(m.avgHoldingHours, 1)} h`),
+    kpi("Avg planned R:R", UI.num(m.avgPlannedRR), `avg realised ${UI.num(m.avgRealizedR, 3)} R`), kpi("Recovery factor", UI.num(m.recoveryFactor)), kpi("Sharpe / Sortino", `${UI.num(m.sharpe)} / ${UI.num(m.sortino)}`, m.note || "daily marked equity"),
+    kpi("Max streaks", `${m.maxConsecutiveWins}W / ${m.maxConsecutiveLosses}L`), kpi("Largest win / loss", `${UI.num(m.largestWin, 0)} / ${UI.num(m.largestLoss, 0)}`), kpi("Total costs", money(m.totalCosts), "commission + spread + slippage")].join("");
+  Charts.line($("cEquity"), { series: [{ name: "Equity", color: "var(--chart-a)".replace("var(--chart-a)", getComputedStyle(document.documentElement).getPropertyValue("--chart-a")), points: run.equityCurve, area: true }], baseline: run.initialCapital, yFormat: (v) => UI.num(v, 0) });
+  Charts.line($("cDd"), { series: [{ name: "Drawdown %", color: getComputedStyle(document.documentElement).getPropertyValue("--bad"), points: run.drawdownCurve, area: true }], yFormat: (v) => v.toFixed(1) + "%" });
+  Charts.bars($("cMonthly"), { items: run.monthly.map(x => ({ label: x.month, value: x.netPnl })), yFormat: (v) => UI.num(v, 0), ariaLabel: "Monthly net P&L" });
+  Charts.line($("cCum"), { series: [{ name: "Cumulative net", color: getComputedStyle(document.documentElement).getPropertyValue("--chart-b"), points: run.cumulativeNet }], baseline: 0, yFormat: (v) => UI.num(v, 0) });
+  Charts.hist($("cPnlHist"), { bins: run.distributions.netPnl, xFormat: (v) => UI.num(v, 0) });
+  Charts.hist($("cRHist"), { bins: run.distributions.rMultiple, xFormat: (v) => UI.num(v, 1) + "R" });
+  const seg = (name) => run.segments[name].map(s => ({ label: s.key, value: s.netPnl, extra: `${s.trades} trades · win ${UI.pct(s.winRate)}` }));
+  Charts.bars($("cSession"), { items: seg("session"), yFormat: (v) => UI.num(v, 0) });
+  const order = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]; Charts.bars($("cWeekday"), { items: seg("weekday").sort((a, b) => order.indexOf(a.label) - order.indexOf(b.label)), yFormat: (v) => UI.num(v, 0) });
+  const ideal = m.idealNetPnlBeforeCosts, net = m.netPnl;
+  $("costs").innerHTML = `<table><tbody><tr><td>Net P&amp;L before any costs</td><td class="num">${money(ideal)}</td></tr><tr><td>− Spread</td><td class="num neg">${money(-m.totalSpreadCost)}</td></tr><tr><td>− Slippage</td><td class="num neg">${money(-m.totalSlippageCost)}</td></tr><tr><td>− Commission</td><td class="num neg">${money(-m.totalCommission)}</td></tr><tr><td><strong>Net P&amp;L after costs</strong></td><td class="num"><strong>${money(net)}</strong></td></tr></tbody></table><p class="small muted">Costs consume ${ideal > 0 ? UI.pct(100 * m.totalCosts / ideal, 0) + " of the zero-cost profit" : "more than the zero-cost result"}. Test with realistic spreads: an edge that disappears with costs was never an edge.</p>`;
+  const p = run.periods || {}, prow = (name, x) => x ? `<tr><td>${name}</td><td class="num">${x.totalTrades}</td><td class="num">${UI.pct(x.winRate)}</td><td class="num ${UI.cls(x.netPnl)}">${money(x.netPnl)}</td><td class="num">${UI.num(x.expectancyR, 3)}</td></tr>` : "";
+  $("periods").innerHTML = `<table><thead><tr><th></th><th class="num">Trades</th><th class="num">Win</th><th class="num">Net</th><th class="num">Exp. R</th></tr></thead><tbody>${prow("All", m)}${prow("In-sample", p.inSample)}${prow("Out-of-sample", p.outOfSample)}${prow("Retrospective (before publication)", p.retrospective)}${prow("After publication", p.postPublication)}</tbody></table>
+    <p class="small muted" style="margin-top:.5rem">${Object.keys(p).length ? "Only out-of-sample and post-publication figures resemble what could have been known at the time." : "No in-sample / publication dates were set for this run. Set them in the workspace to separate what was knowable at the time from hindsight."} A sample under ~30 trades is too small to judge.</p>`;
+}
+
+function renderJournal() {
+  const dir = $("fDir").value, res = $("fRes").value, ses = $("fSes").value, q = $("fQ").value.toLowerCase();
+  const list = rows.filter(r => (!dir || r.direction === dir) && (!res || r.result.startsWith(res)) && (!ses || r.session === ses) && (!q || (r.observations + r.setup).toLowerCase().includes(q)));
+  $("jCount").textContent = `${list.length} of ${rows.length} trades`;
+  document.querySelector("#jTable tbody").innerHTML = list.map(r => `<tr class="clickable" data-t="${r.tradeId}"><td data-v="${r.tradeId.split("-T")[1]}">${r.tradeId.split("-T")[1]}</td><td>${r.entryTimeLocal.slice(0, 16)}</td><td><span class="pill ${r.direction === "LONG" ? "ok" : "bad"}">${r.direction[0]}</span></td><td>${UI.esc(r.session)}</td>
+    <td class="num">${r.actualEntry.toPrecision(6)}</td><td class="num">${r.initialSl.toPrecision(6)}</td><td class="num small">${UI.esc(r.plannedTp.replaceAll("TP", ""))}</td><td class="num">${r.positionSize}</td><td class="num">${UI.num(r.amountRisked)}</td><td class="num">${UI.num(r.plannedRR)}</td>
+    <td class="num">${r.finalExit.toPrecision(6)}</td><td class="small">${UI.esc(r.exitReason)}${r.ambiguous === "yes" ? " ⚠" : ""}</td><td class="num">${UI.num(r.grossPnl)}</td><td class="num">${UI.num(r.fees)}</td><td class="num ${UI.cls(r.netPnl)}">${UI.num(r.netPnl)}</td><td class="num ${UI.cls(r.rMultiple)}">${r.rMultiple == null ? "—" : UI.num(r.rMultiple)}</td><td>${r.result.split(" ")[0].toLowerCase()}</td><td class="small">${UI.esc(r.holdingTime)}</td></tr>`).join("");
+  document.querySelectorAll("#jTable tbody tr").forEach(tr => tr.onclick = () => openTrade(tr.dataset.t));
+}
+async function openTrade(id) {
+  UI.drawer.open("Trade " + id, '<div class="skeleton" style="height:300px"></div>');
+  try {
+    const [t, svg] = await Promise.all([UI.api(`/api/runs/${RUN}/trades/${id}`), UI.api(`/api/runs/${RUN}/trades/${id}/chart.svg`)]);
+    const r = rows.find(x => x.tradeId === id) || {}, fields = Object.entries(r).filter(([k]) => !["observations", "chart", "eventLog", "reasonForTrade", "triggerLogic", "slTpLogic"].includes(k));
+    UI.drawer.open(`Trade ${id} · ${t.direction} ${t.symbol} · ${t.result}`, `
+      <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;margin-bottom:1rem">${svg}</div>
+      <h3 class="small">Why this trade happened (from the rule and simulation records)</h3><ol class="steps small">${t.explanation.map(x => `<li>${UI.esc(x)}</li>`).join("")}</ol>
+      <h3 class="small" style="margin-top:1rem">Event log</h3><table><tbody>${t.events.map(e => `<tr><td class="mono small">${UI.esc((e.time || "").replace("T", " ").replace("Z", ""))}</td><td><span class="pill">${UI.esc(e.type.toLowerCase().replaceAll("_", " "))}</span></td><td class="small">${UI.esc(e.detail || "")}${e.price ? ` <span class="mono">@ ${(+e.price).toPrecision(7)}</span>` : ""}</td></tr>`).join("")}</tbody></table>
+      <h3 class="small" style="margin-top:1rem">All journal fields</h3><table><tbody>${fields.map(([k, v]) => `<tr><td class="muted small">${UI.esc(k)}</td><td class="small">${UI.esc(v)}</td></tr>`).join("")}</tbody></table>`);
+  } catch (e) { UI.drawer.open("Trade " + id, `<div class="banner bad">${UI.esc(e.message)}</div>`); }
+}
+
+function segments() {
+  const key = $("segSel").value, list = run.segments[key] || [];
+  Charts.bars($("cSeg"), { items: list.map(s => ({ label: String(s.key), value: s.netPnl, extra: `${s.trades} trades` })), yFormat: (v) => UI.num(v, 0) });
+  document.querySelector("#segTable tbody").innerHTML = list.map(s => `<tr><td>${UI.esc(s.key)}</td><td class="num">${s.trades}</td><td class="num">${UI.pct(s.winRate)}</td><td class="num ${UI.cls(s.netPnl)}">${money(s.netPnl)}</td><td class="num">${UI.num(s.profitFactor)}</td><td class="num">${UI.num(s.expectancyR, 3)}</td><td class="num">${money(s.totalCosts)}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">No data</td></tr>';
+  $("segNote").textContent = key === "hour" || key === "weekday" || key === "month" ? "Times are shown in " + run.segments.displayTimezone : "";
+}
+
+function validation() {
+  const v = run.validation, a = run.lookaheadAudit, q = run.dataQuality, r = run.reproducibility;
+  $("valBody").innerHTML = `
+    <div class="kpis">${kpi("Status", `<span class="pill ${run.status === "VALID" ? "ok" : "bad"}" style="font-size:.9rem">${run.status.toLowerCase()}</span>`)}${kpi("Checks passed", v.passed)}${kpi("Failed", v.failed, "", v.failed ? "neg" : "")}${kpi("Warnings", v.warnings)}${kpi("Data coverage", q.coveragePct + "%", `${q.unexpectedGapCount} unexpected gaps`)}${kpi("Run time", run.runSeconds + " s")}</div>
+    <div class="grid cols-2"><div class="card flush"><div class="card-title" style="padding:1rem 1rem 0">Automated validation</div><table><tbody>${v.checks.map(c => `<tr><td>${UI.statusPill(c.status)}</td><td class="small">${UI.esc(c.name)}${c.detail ? `<div class="muted">${UI.esc(c.detail)}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>
+    <div class="stack">
+      <div class="card"><div class="card-title">No-future-data audit</div><p class="small">${UI.esc(a.method)}</p><ul class="small" style="padding-left:1.1rem"><li>${a.seriesAudit.series} series rebuilt on ${a.seriesAudit.cuts.length} truncated data sets: <strong>${a.seriesAudit.passed ? "identical" : a.seriesAudit.mismatches.length + " mismatches"}</strong></li><li>${a.sampled} of ${a.totalClosedTrades} trades re-simulated on data ending at the signal and exit bars: <strong>${a.failures.length ? a.failures.length + " differed" : "all identical"}</strong></li><li>Guarded replay (any read of an unclosed bar raises): <strong>${a.guardedReplay.passed ? "clean" : "FAILED — " + UI.esc(a.guardedReplay.detail)}</strong></li></ul></div>
+      <div class="card"><div class="card-title">Reproducibility</div>${r ? `<p class="small">Two runs with identical inputs: <strong>${r.identical ? "identical results" : "DIFFERENT"}</strong></p><div class="mono small muted" style="word-break:break-all">result hash ${run.resultHash}</div>` : '<p class="small muted">Not verified for this run.</p>'}<div class="mono small muted" style="word-break:break-all">strategy ${run.strategyHash.slice(0, 24)}… · config ${run.configHash.slice(0, 24)}… · data ${run.datasetSha256.slice(0, 24)}…</div></div>
+      <div class="card"><div class="card-title">Audit trail</div><table><tbody><tr><td class="muted small">Strategy version</td><td class="small">${UI.esc(run.strategyVersion || "")} ${run.approvedBy ? `· approved by ${UI.esc(run.approvedBy)}` : ""}</td></tr><tr><td class="muted small">Data</td><td class="small">${UI.esc(run.provider || "")} · ${UI.esc(run.dataSource || "")} · ${UI.esc((run.datasetMeta || {}).licence || "")}</td></tr><tr><td class="muted small">Simulator</td><td class="small">${run.simulatorVersion} · run ${UI.date(run.runDate)}</td></tr><tr><td class="muted small">Order flow</td><td class="small">${run.counters.signals} signals · ${run.counters.ordersPlaced} orders · ${run.counters.filled} fills · ${run.counters.expired} expired</td></tr></tbody></table>
+        ${Object.keys(run.counters.rejected).length ? `<div class="small muted" style="margin-top:.4rem">Signals not traded: ${Object.entries(run.counters.rejected).map(([k, n]) => `${k.toLowerCase().replaceAll("_", " ")} ×${n}`).join(", ")}</div>` : ""}</div>
+      <div class="card"><div class="card-title">Assumptions &amp; limitations</div><ul class="small" style="padding-left:1.1rem">${run.assumptions.map(x => `<li>${UI.esc(x)}</li>`).join("")}</ul><p class="small muted">${UI.esc(run.limitations)}</p></div>
+    </div></div>`;
+}
+
+$("genPine").onclick = async () => { try { const r = await UI.api(`/api/runs/${RUN}/pine`, { method: "POST" }); const audit = r.audit.findings.map(f => `<div class="small"><span class="pill ${f.severity === "FAIL" ? "bad" : f.severity === "WARN" ? "warn" : f.severity === "PASS" ? "ok" : ""}">${f.severity}</span> ${UI.esc(f.message)}</div>`).join("");
+  UI.drawer.open("Pine Script v6", `<div class="row" style="margin-bottom:.6rem"><span class="pill ${r.equivalence === "FULL" ? "ok" : r.equivalence === "APPROXIMATE" ? "warn" : "bad"}">equivalence: ${r.equivalence.replaceAll("_", " ").toLowerCase()}</span><span class="pill ${r.audit.verdict === "PASS" ? "ok" : r.audit.verdict === "WARN" ? "warn" : "bad"}">audit: ${r.audit.verdict.toLowerCase()}</span><button class="btn sm ghost" id="pc">Copy</button><button class="btn sm ghost" id="pd">Download</button></div>${r.unsupported.map(u => `<div class="banner bad">${UI.esc(u)}</div>`).join("")}${r.warnings.map(w => `<div class="small muted">⚠ ${UI.esc(w)}</div>`).join("")}<div style="margin:.5rem 0">${audit}</div><pre class="code-block">${UI.esc(r.script)}</pre>`);
+  $("pc").onclick = () => UI.copy(r.script); $("pd").onclick = () => UI.download("strategy.pine", r.script); } catch (e) { UI.toast(e.message, "bad"); } };
+$("tvForm").addEventListener("submit", async (e) => { e.preventDefault(); try { const r = await UI.api(`/api/runs/${RUN}/tradingview/compare`, { form: new FormData(e.target) });
+  $("tvResult").innerHTML = `<div class="card"><div class="card-title">Comparison</div><div class="banner ${r.verdict.startsWith("EQUIV") ? "ok" : "bad"}"><strong>${r.verdict.replaceAll("_", " ")}</strong> — ${UI.esc(r.explanation)}</div><div class="kpis">${kpi("Matched trades", r.matched)}${kpi("Only in this engine", r.onlyInEngine.length)}${kpi("Only in TradingView", r.onlyInTradingView.length)}</div>
+    <table><thead><tr><th>Engine trade</th><th>TradingView #</th><th class="num">Entry Δ price</th><th class="num">Exit Δ price</th><th class="num">Net P&amp;L Δ</th><th>Why they differ</th></tr></thead><tbody>${r.pairs.map(p => `<tr><td class="small">${p.ourTrade}</td><td>${p.tvTrade}</td><td class="num">${p.differences.entryPrice == null ? "—" : (+p.differences.entryPrice).toFixed(6)}</td><td class="num">${p.differences.exitPrice == null ? "—" : (+p.differences.exitPrice).toFixed(6)}</td><td class="num">${p.differences.netPnl == null ? "—" : UI.num(p.differences.netPnl)}</td><td class="small">${p.reasons.length ? p.reasons.map(UI.esc).join("; ") : '<span class="pos">within tolerance</span>'}</td></tr>`).join("")}</tbody></table></div>`; } catch (err) { UI.toast(err.message, "bad"); } });
+
+async function google() {
+  const s = await UI.api("/api/google/status");
+  $("gStatus").innerHTML = !s.configured ? 'Google is not configured on this server (set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET). <a href="/integrations">Setup guide</a>' : s.connected ? '<span class="pill ok">connected</span>' : 'Not connected. <a href="/integrations">Connect Google</a>';
+  $("gBtn").disabled = !(s.configured && s.connected) || {{ (run.status != 'VALID')|tojson }};
+}
+$("gForm").addEventListener("submit", async (e) => { e.preventDefault(); $("gBtn").disabled = true; try { const r = await UI.api(`/api/runs/${RUN}/export/sheets`, { json: { spreadsheet: $("gUrl").value.trim() || null, title: $("gTitle").value.trim() || null } });
+  $("gResult").innerHTML = `<div class="banner ok" style="margin-top:.6rem"><a href="${UI.esc(r.url)}" target="_blank" rel="noopener">Open the spreadsheet ↗</a> — ${r.rowsAppended} rows added, ${r.rowsUpdated} updated, ${r.totalTrades} trades total.</div>`; } catch (err) { UI.toast(err.message, "bad"); } $("gBtn").disabled = false; });
+
+$("renameRun").onclick = async () => { const label = prompt("Run name", {{ (run.label or run.strategyName)|tojson }}); if (label === null) return; const note = prompt("Note (optional)", {{ (run.ownerNote or '')|tojson }}); try { await UI.api("/api/runs/" + RUN, { method: "PATCH", json: { label, note: note || "" } }); location.reload(); } catch (e) { UI.toast(e.message, "bad"); } };
+$("deleteRun").onclick = async () => { if (!confirm("Delete this run and its whole journal? This cannot be undone.")) return; try { await UI.api("/api/runs/" + RUN, { method: "DELETE" }); location.href = "/runs"; } catch (e) { UI.toast(e.message, "bad"); } };
+$("segSel").onchange = segments; ["fDir", "fRes", "fSes", "fQ"].forEach(id => $(id).addEventListener("input", renderJournal));
+(async () => {
+  run = await UI.api("/api/runs/" + RUN); overview(); segments(); validation(); google(); document.querySelectorAll(".tzl").forEach(x => x.textContent = run.configSnapshot.display_tz);
+  const j = await UI.api(`/api/runs/${RUN}/journal`); rows = j.rows; [...new Set(rows.map(r => r.session))].sort().forEach(s => $("fSes").insertAdjacentHTML("beforeend", `<option>${UI.esc(s)}</option>`)); renderJournal(); UI.sortable($("jTable"));
+  document.querySelector("[data-tabs]").addEventListener("tabchange", (e) => { if (e.detail === "segments") segments(); if (e.detail === "overview") overview(); });
+  let timer; window.addEventListener("resize", () => { clearTimeout(timer); timer = setTimeout(() => { if (run) { overview(); segments(); } }, 250); });
+})();
+</script>
+{% endblock %}

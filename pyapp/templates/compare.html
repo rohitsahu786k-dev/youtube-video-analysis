@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Strategy Comparison · Trader Video Intelligence{% endblock %}
+{% block page_title %}Strategy Comparison{% endblock %}
+{% block page_subtitle %}Compare strategies, instruments, sessions and configurations side by side{% endblock %}
+{% block content %}
+<div class="card"><div class="card-title">Choose runs to compare (2–12)</div><div id="picker"><div class="skeleton" style="height:90px"></div></div>
+  <div class="row" style="margin-top:.7rem"><button class="btn btn-primary" id="go" disabled>Compare selected</button><span class="small muted">Tip: run the same strategy on several instruments, or one instrument under several configurations or periods.</span></div></div>
+<div id="result"></div>
+<div class="card flush"><div class="card-title" style="padding:1rem 1rem 0">Optimisation &amp; walk-forward studies</div><div id="opts" style="padding:0 1rem 1rem"></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+const COLORS = ["--chart-a", "--chart-b", "--chart-c", "--chart-d", "--chart-e"].map(v => getComputedStyle(document.documentElement).getPropertyValue(v));
+let runs = [];
+(async () => {
+  runs = await UI.api("/api/runs");
+  $("picker").innerHTML = runs.length ? `<div class="table-responsive"><table><tbody>${runs.map(r => `<tr><td style="width:30px"><input type="checkbox" value="${r.id}" aria-label="Select ${UI.esc(r.label || r.strategyName)}"></td><td><strong>${UI.esc(r.label || r.strategyName)}</strong> <span class="muted small">${UI.esc(r.strategyVersion || "")}</span></td><td>${UI.esc(r.symbol)} ${r.timeframe}</td><td class="small">${r.dataRange.firstBar.slice(0, 10)} → ${r.dataRange.lastBar.slice(0, 10)}</td><td class="num">${r.metrics.totalTrades} trades</td><td class="num ${UI.cls(r.metrics.netPnl)}">${UI.money(r.metrics.netPnl)}</td><td>${UI.statusPill(r.status)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">No runs yet. <a href="/backtest">Run a backtest</a>.</div>';
+  $("picker").addEventListener("change", () => { const n = $("picker").querySelectorAll("input:checked").length; $("go").disabled = n < 2 || n > 12; });
+  const opts = await UI.api("/api/optimizations");
+  $("opts").innerHTML = opts.length ? `<table><thead><tr><th>Study</th><th>Mode</th><th>Objective</th><th>Created</th></tr></thead><tbody>${opts.map(o => `<tr><td><a href="#" data-o="${o.id}">${o.id.slice(0, 8)}</a></td><td>${o.kind.replace("_", " ")}</td><td>${o.objective}</td><td>${UI.date(o.createdAt)}</td></tr>`).join("")}</tbody></table><div id="oDetail"></div>` : '<div class="empty">No optimisation studies yet. Start one from the <a href="/backtest#optimize">Backtesting Workspace</a>.</div>';
+  $("opts").querySelectorAll("[data-o]").forEach(a => a.onclick = async (e) => { e.preventDefault(); const o = await UI.api("/api/optimizations/" + a.dataset.o); $("oDetail").innerHTML = `<div class="banner warn" style="margin-top:.8rem">${UI.esc(o.warning)}</div><pre class="code-block">${UI.esc(JSON.stringify(o.kind === "grid" ? o.top : o.folds, null, 2))}</pre>`; });
+})();
+$("go").onclick = async () => {
+  const ids = [...$("picker").querySelectorAll("input:checked")].map(i => i.value);
+  try { const c = await UI.api("/api/compare", { json: { runIds: ids } }); render(c); } catch (e) { UI.toast(e.message, "bad"); }
+};
+function render(c) {
+  const best = (k, hi = true) => { const v = c.runs.map(r => r[k]).filter(x => x != null); return v.length ? (hi ? Math.max(...v) : Math.min(...v)) : null; };
+  const cell = (r, k, fmt, hi = true) => { const b = best(k, hi); return `<td class="num ${r[k] != null && r[k] === b && c.runs.length > 1 ? "pos" : ""}">${r[k] == null ? "—" : fmt(r[k])}</td>`; };
+  $("result").innerHTML = `${c.warnings.map(w => `<div class="banner warn">${UI.esc(w)}</div>`).join("")}
+  <div class="card"><div class="card-title">Equity curves (each rebased to its own start)</div><div class="chart" id="cmpChart"></div></div>
+  <div class="card flush"><div class="table-responsive"><table><thead><tr><th>Run</th><th>Instrument</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Net P&amp;L</th><th class="num">Profit factor</th><th class="num">Expectancy</th><th class="num">Exp. R</th><th class="num">Max DD %</th><th class="num">Sharpe</th><th class="num">Recovery</th><th class="num">Profitable months %</th><th class="num">Costs</th></tr></thead><tbody>
+    ${c.runs.map((r, i) => `<tr><td><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${COLORS[i % 5]};margin-right:6px"></i><strong>${UI.esc(r.label)}</strong><div class="small muted">${UI.statusPill(r.fidelity || "")} ${r.status !== "VALID" ? UI.statusPill(r.status) : ""}</div></td><td>${UI.esc(r.symbol)} ${r.timeframe}<div class="small muted">${r.from.slice(0, 10)} → ${r.to.slice(0, 10)}</div></td><td class="num">${r.trades}</td>${cell(r, "winRate", v => UI.pct(v))}${cell(r, "netPnl", v => UI.money(v))}${cell(r, "profitFactor", v => UI.num(v))}${cell(r, "expectancy", v => UI.money(v))}${cell(r, "expectancyR", v => UI.num(v, 3))}${cell(r, "maxDrawdownPct", v => UI.pct(v, 2), false)}${cell(r, "sharpe", v => UI.num(v))}${cell(r, "recoveryFactor", v => UI.num(v))}${cell(r, "profitableMonthsPct", v => UI.pct(v, 0))}${cell(r, "totalCosts", v => UI.money(v), false)}</tr>`).join("")}</tbody></table></div></div>
+  <div class="grid cols-2">${["sessionBreakdown", "instrumentBreakdown"].map(key => `<div class="card"><div class="card-title">${key === "sessionBreakdown" ? "By session" : "By instrument"}</div><table><thead><tr><th></th>${c.runs.map((r, i) => `<th class="num">${UI.esc(r.label.slice(0, 18))}</th>`).join("")}</tr></thead><tbody>${[...new Set(c.runs.flatMap(r => r[key].map(s => s.key)))].map(k => `<tr><td>${UI.esc(k)}</td>${c.runs.map(r => { const s = r[key].find(x => x.key === k); return `<td class="num ${s ? UI.cls(s.netPnl) : ""}">${s ? UI.num(s.netPnl, 0) + `<div class="small muted">${s.trades} tr</div>` : "—"}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`).join("")}</div>
+  <p class="small muted">${UI.esc(c.note)} Highlighted cells mark the best value in each column; with few trades, differences are not statistically meaningful.</p>`;
+  Charts.line($("cmpChart"), { series: c.runs.map((r, i) => ({ name: r.label, color: COLORS[i % 5], points: r.equityCurve.map(p => [p[0], p[1] - r.equityCurve[0][1]]) })), baseline: 0, yFormat: (v) => UI.num(v, 0) });
+}
+</script>
+{% endblock %}

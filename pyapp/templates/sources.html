@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}YouTube Source Manager · Trader Video Intelligence{% endblock %}
+{% block page_title %}YouTube Source Manager{% endblock %}
+{% block page_subtitle %}Videos, playlists and whole channels — with explicit coverage, never an overstated claim{% endblock %}
+
+{% block content %}
+{% if not ai_ready %}<div class="banner warn">Analysis needs <code>GEMINI_API_KEY</code> (and FFmpeg). Existing sources stay visible; new analysis is disabled.</div>{% endif %}
+<div class="card">
+  <div class="card-title">Add a source</div>
+  <form id="addForm" class="row" style="align-items:flex-start">
+    <label class="field" style="flex:1;min-width:280px">YouTube URL<input class="input" id="url" type="url" placeholder="https://www.youtube.com/@channel   ·   playlist?list=…   ·   watch?v=…" required></label>
+    <button class="btn btn-primary" id="addBtn" type="submit" style="margin-top:1.3rem">Discover &amp; analyse</button>
+  </form>
+  <div id="preview" style="margin-top:.6rem"></div>
+  <p class="small muted" style="margin-top:.6rem">Channels: all accessible public uploads and past live streams{% if include_shorts %} and Shorts{% endif %} are discovered (up to {{ max_channel }}). Videos that clearly are not about trading are <em>skipped</em> and can be forced. Restricted videos are marked <em>awaiting permission</em> — upload an authorized transcript or media file instead of bypassing the restriction. Downloading must respect YouTube's terms and the creator's rights.</p>
+</div>
+
+<div id="queue"></div>
+<div id="sources"><div class="skeleton" style="height:140px"></div></div>
+
+<div class="drawer-backdrop" id="uploadBack"></div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+const states = [["completed","Completed","var(--ok)"],["analyzing","Analyzing","var(--chart-a)"],["queued","Queued","var(--chart-c)"],["awaiting_permission","Awaiting permission","var(--chart-d)"],["failed","Failed","var(--bad)"],["unavailable","Unavailable","#64748b"],["skipped","Skipped","#94a3b8"],["discovered","Discovered","#cbd5e1"]];
+const GROUP = {COMPLETED:"completed",FAILED:"failed",UNAVAILABLE:"unavailable",AWAITING_PERMISSION:"awaiting_permission",SKIPPED:"skipped",QUEUED:"queued",DISCOVERED:"discovered"};
+let open = new Set();
+
+$("url").addEventListener("change", async () => { try { const p = await UI.api("/api/sources/preview", {json:{url:$("url").value.trim()}}); $("preview").innerHTML = `<div class="banner info" style="margin:0">${p.thumbnail?`<img src="${UI.esc(p.thumbnail)}" alt="" style="height:48px;border-radius:4px;float:left;margin-right:.75rem">`:""}<strong>${UI.esc(p.kind)}</strong> — ${UI.esc(p.note)}</div>`; } catch(e) { $("preview").innerHTML = `<div class="banner bad" style="margin:0">${UI.esc(e.message)}</div>`; } });
+$("addForm").addEventListener("submit", async (e) => { e.preventDefault(); $("addBtn").disabled = true; try { const r = await UI.api("/api/sources", {json:{url:$("url").value.trim()}}); UI.toast(r.message, "ok"); $("url").value=""; $("preview").innerHTML=""; load(); } catch(err) { UI.toast(err.message, "bad"); } $("addBtn").disabled = false; });
+
+function coverageBar(c) {
+  const total = c.total || 1;
+  return `<div class="progress stacked" role="img" aria-label="Coverage">${states.map(([k,l,col]) => c[k] ? `<span style="width:${100*c[k]/total}%;--c:${col}" title="${l}: ${c[k]}"></span>` : "").join("")}</div>
+  <div class="legend">${states.filter(([k]) => c[k]).map(([k,l,col]) => `<span><i style="background:${col}"></i>${l} ${c[k]}</span>`).join("")}</div>`;
+}
+
+async function load() {
+  const [sources, ingestions] = await Promise.all([UI.api("/api/sources"), UI.api("/api/ingestions")]);
+  const active = ingestions.filter(j => ["QUEUED","RESOLVING","FAILED"].includes(j.status));
+  $("queue").innerHTML = active.length ? `<div class="card"><div class="card-title">Discovery queue</div>${active.map(j => `<div class="row between small" style="margin-bottom:.4rem"><span><span class="pill ${j.status==="FAILED"?"bad":"info"}">${j.status.toLowerCase()}</span> ${UI.esc(j.kind||"")} <span class="mono">${UI.esc(j.url)}</span>${j.error?`<div class="neg">${UI.esc(j.error)}</div>`:""}</span>${j.status==="FAILED"?`<button class="btn sm ghost" data-retry="${j.id}">Retry</button>`:""}</div>`).join("")}</div>` : "";
+  document.querySelectorAll("[data-retry]").forEach(b => b.onclick = async () => { await UI.api(`/api/ingestions/${b.dataset.retry}/retry`, {method:"POST"}).catch(e => UI.toast(e.message,"bad")); load(); });
+  if (!sources.length) { $("sources").innerHTML = '<div class="card"><div class="empty">No sources yet. Paste a YouTube link above to begin.</div></div>'; return; }
+  $("sources").innerHTML = sources.map(s => { const c = s.coverage; return `
+    <div class="card" data-id="${s.id}">
+      <div class="row between"><div><strong>${UI.esc(s.title)}</strong> <span class="pill info">${s.kind}</span> ${c.fullCoverage?'<span class="pill ok">full coverage</span>':'<span class="pill warn">partial coverage</span>'}
+        <div class="small muted">${UI.esc(s.channel||"")} · synced ${UI.date(s.lastSyncedAt)}</div></div>
+        <div class="row"><button class="btn sm ghost" data-sync="${s.id}">Sync new videos</button><button class="btn sm ghost" data-toggle="${s.id}">${open.has(s.id)?"Hide":"Show"} videos</button><button class="btn sm ghost" data-remove="${s.id}" title="Removes the record only; evidence stays">Remove</button></div></div>
+      <div style="margin:.8rem 0 .3rem">${coverageBar(c)}</div>
+      <div class="small ${c.fullCoverage?"pos":""}" style="margin-top:.4rem">${UI.esc(c.statement)}</div>
+      <div id="v-${s.id}" style="margin-top:.8rem">${open.has(s.id) ? '<div class="skeleton" style="height:90px"></div>' : ""}</div>
+    </div>`; }).join("");
+  document.querySelectorAll("[data-sync]").forEach(b => b.onclick = async () => { try { await UI.api(`/api/sources/${b.dataset.sync}/sync`, {method:"POST"}); UI.toast("Sync queued — new videos only, no duplicates", "ok"); load(); } catch(e) { UI.toast(e.message,"bad"); } });
+  document.querySelectorAll("[data-remove]").forEach(b => b.onclick = async () => { if (!confirm("Remove this source record? Analysed evidence and strategies are kept.")) return; await UI.api(`/api/sources/${b.dataset.remove}`, {method:"DELETE"}); load(); });
+  document.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => { const id = b.dataset.toggle; open.has(id) ? open.delete(id) : open.add(id); load(); });
+  for (const id of open) loadVideos(id);
+}
+
+async function loadVideos(id) {
+  const box = $("v-" + id); if (!box) return;
+  const videos = await UI.api(`/api/sources/${id}/videos`);
+  box.innerHTML = `<div class="table-responsive" style="max-height:420px;overflow:auto"><table data-sortable><thead><tr><th data-sort>Title</th><th data-sort class="num">Length</th><th data-sort>Status</th><th>Actions</th></tr></thead><tbody>
+    ${videos.map(v => `<tr><td><a href="/videos/${v.id}">${UI.esc(v.title)}</a>${v.statusNote?`<div class="small muted">${UI.esc(v.statusNote)}</div>`:""}${v.error?`<div class="small neg">${UI.esc(v.error)}</div>`:""}${v.sourceChanged?'<div class="small" style="color:var(--warn)">Source changed since analysis — reprocess?</div>':""}${v.visualAnalysis===false&&v.status==="COMPLETED"?'<div class="small" style="color:var(--warn)">Transcript-only: no chart analysis</div>':""}</td>
+      <td class="num" data-v="${v.duration}">${v.duration?UI.mmss(v.duration):"—"}</td><td data-v="${v.group}">${UI.statusPill(v.status)}${["analyzing"].includes(v.group)?` <span class="small muted">${v.progress||0}%</span>`:""}</td>
+      <td class="row">${actions(v)}</td></tr>`).join("")}</tbody></table></div>`;
+  UI.sortable(box.querySelector("table"));
+  box.querySelectorAll("[data-act]").forEach(b => b.onclick = () => act(b.dataset.act, b.dataset.id));
+}
+function actions(v) {
+  const a = [];
+  if (["SKIPPED","FAILED","AWAITING_PERMISSION","UNAVAILABLE"].includes(v.status)) a.push(["analyze", v.status==="SKIPPED"?"Analyze anyway":"Retry"]);
+  if (["AWAITING_PERMISSION","UNAVAILABLE","FAILED"].includes(v.status)) { a.push(["transcript","Upload transcript"]); a.push(["media","Upload media"]); }
+  if (v.status === "COMPLETED") a.push(["reprocess","Reprocess"]);
+  if (!["DOWNLOADING","TRANSCRIBING","DETECTING_EVENTS","ANALYZING_VISUALS","BUILDING_KNOWLEDGE","EXTRACTING_STRATEGIES","DRAFTING_RULES"].includes(v.status)) a.push(["delete","Delete"]);
+  return a.map(([k,l]) => `<button class="btn sm ghost" data-act="${k}" data-id="${v.id}">${l}</button>`).join("");
+}
+async function act(kind, id) {
+  try {
+    if (kind === "delete") { if (!confirm("Delete this video and everything derived from it?")) return; await UI.api(`/api/videos/${id}`, {method:"DELETE"}); UI.toast("Deleted", "ok"); }
+    else if (kind === "analyze" || kind === "reprocess") { if (kind==="reprocess" && !confirm("Re-run the full analysis? New evidence replaces the old when it completes.")) return; await UI.api(`/api/videos/${id}/${kind}`, {method:"POST"}); UI.toast("Queued", "ok"); }
+    else { const input = document.createElement("input"); input.type="file"; input.accept = kind==="transcript" ? ".srt,.vtt,.json,.txt" : ".mp4,.mkv,.webm,.mov,.mp3,.m4a,.wav";
+      input.onchange = async () => { const f = new FormData(); f.append("file", input.files[0]); try { const r = await UI.api(`/api/videos/${id}/${kind}`, {form:f}); UI.toast(kind==="transcript" ? `Transcript accepted (${r.segments} segments${r.timestampsEstimated?", timestamps estimated":""}). No chart analysis will be performed.` : "Media accepted and queued.", "ok"); load(); } catch(e) { UI.toast(e.message,"bad"); } };
+      input.click(); return; }
+    load();
+  } catch (e) { UI.toast(e.message, "bad"); }
+}
+load(); setInterval(() => { if (!document.hidden) load(); }, 10000);
+</script>
+{% endblock %}

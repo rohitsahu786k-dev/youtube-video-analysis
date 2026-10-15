@@ -1,41 +1,37 @@
 {% extends "base.html" %}
-
-{% block title %}Videos | Forex Trader Video Intelligence{% endblock %}
-{% block page_title %}Analyzed Videos{% endblock %}
-{% block page_subtitle %}YouTube videos ingested into the multimodal AI pipeline{% endblock %}
+{% block title %}Video Analysis Library · Trader Video Intelligence{% endblock %}
+{% block scripts %}<script>
+document.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async (e) => { e.stopPropagation(); if (!confirm("Delete this video and everything derived from it (transcript, frames, rules, trades)?")) return; try { await UI.api("/api/videos/" + b.dataset.del, { method: "DELETE" }); location.reload(); } catch (err) { UI.toast(err.message, "bad"); } }));
+</script>{% endblock %}
+{% block page_title %}Video Analysis Library{% endblock %}
+{% block page_subtitle %}Transcripts, chart evidence and extracted rules for every analysed video{% endblock %}
 
 {% block content %}
 <div class="card">
-  <div class="card-title">
-    <span>Video Archives</span>
-    <button class="btn btn-primary" onclick="openIngestModal()">+ Ingest New Video</button>
-  </div>
-
-  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 1.25rem;">
-    {% for v in videos %}
-    <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow-sm); transition: transform 0.15s, box-shadow 0.15s;">
-      <div style="position: relative; width: 100%; aspect-ratio: 16/9; background: #e2e8f0;">
-        <img src="{{ v.thumbnail }}" alt="{{ v.title }}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.src='https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=600&auto=format&fit=crop&q=80'">
-        <div style="position: absolute; bottom: 8px; right: 8px; background: rgba(15,23,42,0.85); color: #fff; font-size: 0.7rem; font-weight: 600; padding: 2px 6px; border-radius: 4px;">
-          {{ (v.duration // 60) }}m
-        </div>
-      </div>
-
-      <div style="padding: 1rem; flex: 1; display: flex; flex-direction: column;">
-        <div style="font-size: 0.72rem; color: var(--accent-cyan); font-weight: 600; margin-bottom: 0.35rem;">{{ v.channel }}</div>
-        <h3 style="font-size: 0.95rem; font-weight: 600; line-height: 1.35; margin-bottom: 0.75rem; flex: 1;">
-          <a href="/videos/{{ v.id }}" style="color: var(--text-main); text-decoration: none;">{{ v.title }}</a>
-        </h3>
-
-        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding-top: 0.75rem; font-size: 0.75rem; color: var(--text-muted);">
-          <span>{{ v.trades }} Trades &bull; {{ v.events }} Events</span>
-          <span class="badge {% if v.status == 'COMPLETED' %}badge-valid{% elif v.status == 'FAILED' %}badge-loss{% else %}badge-uncertain{% endif %}">
-            {{ v.status }}
-          </span>
-        </div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
+  <form class="row" method="get">
+    <input class="input" style="max-width:340px" name="q" value="{{ q }}" placeholder="Search titles" aria-label="Search titles">
+    <input type="hidden" name="group" value="{{ group }}">
+    <button class="btn btn-secondary" type="submit">Search</button>
+    <span class="row" style="margin-left:auto">
+      <a class="pill {{ 'info' if not group }}" href="/videos?q={{ q|urlencode }}">All {{ total }}</a>
+      {% for key, label in [('completed','Completed'),('analyzing','Analyzing'),('queued','Queued'),('awaiting_permission','Awaiting permission'),('failed','Failed'),('unavailable','Unavailable'),('skipped','Skipped')] %}{% if counts.get(key) %}
+      <a class="pill {{ 'info' if group == key }}" href="/videos?group={{ key }}&q={{ q|urlencode }}">{{ label }} {{ counts[key] }}</a>{% endif %}{% endfor %}
+    </span>
+  </form>
+</div>
+<div class="card flush">
+  {% if videos %}
+  <div class="table-responsive"><table data-sortable>
+    <thead><tr><th data-sort>Video</th><th data-sort>Channel</th><th data-sort class="num">Length</th><th data-sort>Status</th><th data-sort class="num">Rules</th><th data-sort class="num">Trades</th><th>Notes</th><th></th></tr></thead>
+    <tbody>{% for v in videos %}
+      <tr class="clickable" onclick="location.href='/videos/{{ v.id }}'">
+        <td><a href="/videos/{{ v.id }}"><strong>{{ v.title }}</strong></a><div class="small muted">{{ v.published if v.published != 'Unknown' else '' }}</div></td>
+        <td>{{ v.channel }}</td><td class="num" data-v="{{ v.duration or 0 }}">{{ ((v.duration or 0) // 60) }}m</td>
+        <td data-v="{{ status_group(v.status) }}"><span class="pill {{ 'ok' if v.status == 'COMPLETED' else 'bad' if v.status in ('FAILED','UNAVAILABLE') else 'warn' if v.status == 'AWAITING_PERMISSION' else 'info' if v.status not in ('QUEUED','SKIPPED','DISCOVERED') else '' }}">{{ v.status|replace('_',' ')|lower }}</span>{% if v.progress and v.status not in ('COMPLETED','FAILED','QUEUED') %} <span class="small muted">{{ v.progress }}%</span>{% endif %}</td>
+        <td class="num" data-v="{{ v.atoms or 0 }}">{{ v.atomsVerified or 0 }}/{{ v.atoms or 0 }}</td><td class="num">{{ v.trades or 0 }}</td>
+        <td class="small muted">{{ v.statusNote or v.error or '' }}{% if v.visualAnalysis is sameas false %} Transcript-only.{% endif %}</td>
+        <td><button class="btn sm ghost" data-del="{{ v.id }}" aria-label="Delete video">Delete</button></td>
+      </tr>{% endfor %}</tbody></table></div>
+  {% else %}<div class="empty">No videos match. <a href="/sources">Add a source</a>.</div>{% endif %}
 </div>
 {% endblock %}

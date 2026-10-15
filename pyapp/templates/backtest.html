@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}Backtesting Workspace · Trader Video Intelligence{% endblock %}
+{% block page_title %}Backtesting Workspace{% endblock %}
+{% block page_subtitle %}Causal, lookahead-audited simulation of an exact approved strategy version{% endblock %}
+
+{% block content %}
+<div class="tabs" data-tabs="#panes" data-hash="1" role="tablist">
+  <button class="tab active" data-tab="run">Run a backtest</button>
+  <button class="tab" data-tab="data">Market data ({{ datasets|length }})</button>
+  <button class="tab" data-tab="optimize">Optimise &amp; walk-forward</button>
+  <button class="tab" data-tab="jobs">Jobs</button>
+</div>
+<div id="panes">
+<div class="tab-panel active" id="run">
+  {% if not versions %}<div class="banner warn"><strong>No approved strategy versions yet.</strong> Backtests must reference an exact approved version. <a href="/editor">Open the editor</a> to write or approve one.</div>{% endif %}
+  {% if not datasets %}<div class="banner warn"><strong>No market data yet.</strong> Add historical candles in the <a href="#data" onclick="document.querySelector('[data-tab=data]').click()">Market data</a> tab (CSV from a licensed vendor, OANDA or Binance).</div>{% endif %}
+  <form id="runForm" class="grid" autocomplete="off">
+    <div class="card">
+      <div class="card-title">1 · What to test</div>
+      <div class="form-grid">
+        <label class="field">Strategy version (approved / frozen)<select id="version" required>{% for v in versions %}<option value="{{ v.id }}" data-tf="{{ v.timeframe }}" data-fid="{{ v.fidelity }}" {% if selected == v.id %}selected{% endif %}>{{ v.strategy }} — {{ v.label }} ({{ v.timeframe }}, {{ v.status|lower }}{% if v.kind == 'optimized_variant' %}, optimised{% endif %})</option>{% endfor %}</select></label>
+        <label class="field">Market data<select id="dataset" required>{% for d in datasets %}<option value="{{ d.id }}" data-tf="{{ d.timeframe }}" data-first="{{ d.first }}" data-last="{{ d.last }}" data-symbol="{{ d.symbol }}" data-cal="{{ d.calendar }}">{{ d.symbol }} {{ d.timeframe }} · {{ d.provider }} · {{ d.first[:10] }} → {{ d.last[:10] }} · {{ d.bars }} bars</option>{% endfor %}</select><span class="hint" id="dsHint"></span></label>
+        <label class="field">Symbol (contract specification)<input id="symbol" placeholder="EURUSD"><span class="hint">Selects tick size, lot size and currency. Override below for anything unusual.</span></label>
+      </div>
+      <div id="fidelityNote" style="margin-top:.7rem"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">2 · Period</div>
+      <div class="row" style="margin-bottom:.7rem" id="quick">{% for k, label in [('3','3 months'),('6','6 months'),('12','1 year'),('24','2 years'),('36','3 years'),('all','All data')] %}<button type="button" class="btn sm ghost" data-m="{{ k }}">{{ label }}</button>{% endfor %}</div>
+      <div class="form-grid">
+        <label class="field">Start (UTC)<input id="start" type="date"></label>
+        <label class="field">End (UTC)<input id="end" type="date"></label>
+        <label class="field">In-sample ends (optional)<input id="isEnd" type="date"><span class="hint">Marks later trades as out-of-sample.</span></label>
+        <label class="field">Strategy published / taught on (optional)<input id="pub" type="date"><span class="hint">Trades before it are labelled “retrospective”, not real-time instructor performance.</span></label>
+      </div>
+      <p class="small muted" style="margin-top:.5rem">Actual coverage depends on the dataset; the report discloses missing intervals and indicators get a warm-up before the start date.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">3 · Account, risk &amp; costs</div>
+      <div class="form-grid">
+        <label class="field">Initial capital<input id="capital" type="number" min="1" step="any" value="10000"></label>
+        <label class="field">Account currency<input id="ccy" value="USD" maxlength="4"></label>
+        <label class="field">Spread (price units)<input id="spread" type="number" min="0" step="any" value="0.0001"><span class="hint" id="pipHint"></span></label>
+        <label class="field">Slippage per market/stop fill<input id="slip" type="number" min="0" step="any" value="0.00001"></label>
+        <label class="field">Commission model<select id="commModel"><option value="none">None</option><option value="per_lot_side">Per lot, per side</option><option value="percent_notional_side">% of notional, per side</option><option value="fixed_per_trade">Fixed per trade</option></select></label>
+        <label class="field">Commission value<input id="commValue" type="number" min="0" step="any" value="0"></label>
+        <label class="field">Leverage (blank = instrument margin)<input id="lev" type="number" min="1" step="any"></label>
+        <label class="field">Conversion rate (only for cross currencies)<input id="conv" type="number" min="0" step="any" placeholder="account ccy per 1 quote ccy"></label>
+      </div>
+      <label class="check" style="margin-top:.6rem"><input type="checkbox" id="useDs" checked> Use the data set's per-bar spread when it has one (overrides the fixed spread)</label>
+      <p class="small muted" style="margin-top:.4rem">Position size and risk percent come from the approved strategy rules. Quantity is always rounded <em>down</em> to the lot step.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">4 · Execution realism</div>
+      <div class="form-grid">
+        <label class="field">Stop and target inside one candle<select id="policy"><option value="conservative">Conservative: assume the stop was hit first</option><option value="lower_tf">Resolve with a lower-timeframe data set</option><option value="ambiguous">Flag as ambiguous (report both bounds)</option></select></label>
+        <label class="field">Lower-timeframe data (optional)<select id="fine"><option value="">None</option>{% for d in datasets %}<option value="{{ d.id }}" data-tf="{{ d.timeframe }}">{{ d.symbol }} {{ d.timeframe }} · {{ d.first[:10] }}</option>{% endfor %}</select></label>
+        <label class="field">Limit order fills<select id="limitFill"><option value="through">Only when price trades through the level (conservative)</option><option value="touch">When price touches the level</option></select></label>
+        <label class="field">Market calendar<select id="calendar"><option value="forex">Forex (24×5)</option><option value="24x7">24×7 (crypto)</option><option value="equity">Equity / index (session gaps)</option></select></label>
+        <label class="field">Journal timezone<input id="tz" value="{{ display_tz }}"></label>
+        <label class="field">Lookahead-audit samples<input id="audit" type="number" min="0" max="50" value="6"><span class="hint">Trades re-simulated on truncated data. 0 skips the sampled audit (series and guarded replays still run).</span></label>
+      </div>
+      <details style="margin-top:.7rem"><summary class="small"><strong>Advanced: contract specification override &amp; news blackouts</strong></summary>
+        <div class="form-grid" style="margin-top:.6rem">
+          <label class="field">Contract size (units per lot)<input id="iSize" type="number" step="any" placeholder="e.g. 100000"></label>
+          <label class="field">Tick size<input id="iTick" type="number" step="any" placeholder="e.g. 0.00001"></label>
+          <label class="field">Quote currency<input id="iQuote" placeholder="USD"></label>
+          <label class="field">Base currency<input id="iBase" placeholder="EUR"></label>
+          <label class="field">Min lot<input id="iMin" type="number" step="any" placeholder="0.01"></label>
+          <label class="field">Lot step<input id="iStep" type="number" step="any" placeholder="0.01"></label>
+          <label class="field">Max lot<input id="iMax" type="number" step="any" placeholder="100"></label>
+          <label class="field">Margin rate (1/leverage)<input id="iMargin" type="number" step="any" placeholder="0.02"></label>
+          <label class="field">Asset class<select id="iClass"><option>forex</option><option>metal</option><option>crypto</option><option>index</option><option>future</option><option>equity</option><option>other</option></select></label>
+        </div>
+        <label class="field" style="margin-top:.7rem">News blackouts (one per line: <span class="mono">start,end,label</span> in ISO UTC — from your own calendar)<textarea id="news" rows="3" placeholder="2024-03-20T18:00:00Z,2024-03-20T19:00:00Z,FOMC"></textarea></label>
+      </details>
+    </div>
+
+    <div class="row"><button class="btn btn-primary" id="runBtn" type="submit" {% if not versions or not datasets %}disabled{% endif %}>Run backtest</button><span id="runMsg" class="small muted"></span></div>
+    <div class="progress" id="runProg" style="display:none"><span style="width:0"></span></div>
+  </form>
+</div>
+
+<div class="tab-panel" id="data">
+  <div class="grid cols-2">
+    <div class="card"><div class="card-title">Upload candles (CSV)</div>
+      <form id="csvForm" class="stack">
+        <label class="field">File<input type="file" name="file" accept=".csv,.txt" required></label>
+        <div class="form-grid">
+          <label class="field">Symbol<input name="symbol" value="EURUSD" required></label>
+          <label class="field">Timeframe<select name="timeframe">{% for t in ['M1','M3','M5','M15','M30','H1','H2','H4','D'] %}<option {% if t == 'M15' %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+          <label class="field">Provider / vendor<input name="provider" placeholder="e.g. Dukascopy export" required minlength="2"></label>
+          <label class="field">Timestamps are in<input name="tz" value="UTC"><span class="hint">IANA zone for naive timestamps, e.g. Europe/Athens (MT4/MT5 server time)</span></label>
+          <label class="field">Calendar<select name="calendar"><option value="forex">Forex 24×5</option><option value="24x7">24×7</option><option value="equity">Equity</option></select></label>
+          <label class="field">Licence note<input name="licence" placeholder="who licensed it, for what use"></label>
+        </div>
+        <button class="btn btn-primary" type="submit">Validate &amp; import</button>
+        <p class="small muted">Columns: time/date, open, high, low, close (+ volume, spread). Rows are validated for OHLC bounds, order, duplicates and timeframe alignment; any repair is disclosed. Only use data you are licensed to use.</p>
+      </form></div>
+    <div class="card"><div class="card-title">Download from a provider</div>
+      <form id="fetchForm" class="stack">
+        <div class="form-grid">
+          <label class="field">Provider<select name="provider"><option value="oanda" {% if not oanda %}disabled{% endif %}>OANDA (bid/ask spreads){% if not oanda %} — not configured{% endif %}</option><option value="binance">Binance (crypto, keyless)</option></select></label>
+          <label class="field">Symbol<input name="symbol" value="EURUSD" required></label>
+          <label class="field">Timeframe<select name="timeframe">{% for t in ['M1','M5','M15','M30','H1','H2','H4','D'] %}<option {% if t == 'M15' %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+          <label class="field">From<input name="start" type="date" required></label>
+          <label class="field">To<input name="end" type="date" required></label>
+        </div>
+        <button class="btn btn-secondary" type="submit">Queue download</button>
+        <p class="small muted">Long ranges at fine timeframes take a while; progress appears under Jobs. Provider terms apply to stored data.</p>
+        <div class="progress" id="fetchProg" style="display:none"><span style="width:0"></span></div>
+      </form></div>
+  </div>
+  <div class="card flush"><div class="card-title" style="padding:1rem 1rem 0">Stored data sets</div>
+    {% if datasets %}<div class="table-responsive"><table><thead><tr><th>Data</th><th>Range</th><th class="num">Bars</th><th>Quality</th><th>Source</th><th></th></tr></thead><tbody>
+    {% for d in datasets %}<tr><td><strong>{{ d.symbol }}</strong> {{ d.timeframe }}<div class="small muted">{{ 'bid/ask spread per bar' if d.hasSpread else 'mid prices, no spread column' }}{% if d.timezoneAssumed and d.timezoneAssumed != 'UTC' %} · stamps converted from {{ d.timezoneAssumed }}{% endif %}</div></td>
+      <td class="small">{{ d.first[:16]|replace('T',' ') }} →<br>{{ d.last[:16]|replace('T',' ') }}</td><td class="num">{{ d.bars }}</td>
+      <td><span class="pill {{ 'ok' if d.quality.assessment == 'CLEAN' else 'warn' }}">{{ d.quality.coveragePct }}% coverage</span>{% if d.quality.unexpectedGapCount %}<div class="small" style="color:var(--warn)">{{ d.quality.unexpectedGapCount }} gaps · {{ d.quality.unexpectedMissingBars }} missing bars</div>{% endif %}{% for r in d.repairs %}<div class="small muted">{{ r }}</div>{% endfor %}</td>
+      <td class="small">{{ d.provider }}<div class="muted" title="{{ d.licence }}">{{ d.source }}{% if d.environment %} · {{ d.environment }}{% endif %}</div><div class="mono muted" title="SHA-256">{{ d.sha256[:10] }}</div></td>
+      <td><button class="btn sm ghost" data-q="{{ d.id }}">Gaps</button> <button class="btn sm ghost" data-del="{{ d.id }}">Delete</button></td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<div class="empty">No data sets.</div>{% endif %}</div>
+</div>
+
+<div class="tab-panel" id="optimize">
+  <div class="banner info">Optimisation never edits the instructor's rules: each promising parameter set becomes a separately labelled <em>optimised variant</em> version. The best of many trials is biased upward, so out-of-sample results are reported next to it, and walk-forward re-optimises per fold for an honest estimate.</div>
+  <div class="card">
+    <div class="form-grid">
+      <label class="field">Mode<select id="oMode"><option value="grid">Grid search + out-of-sample check</option><option value="walk_forward">Walk-forward</option></select></label>
+      <label class="field">Objective<select id="oObj"><option value="expectancyR">Expectancy (R)</option><option value="profitFactor">Profit factor</option><option value="netPnl">Net P&amp;L</option><option value="sqn">SQN</option><option value="recoveryFactor">Recovery factor</option></select></label>
+      <label class="field">Out-of-sample share<input id="oOos" type="number" min="0.1" max="0.5" step="0.05" value="0.3"></label>
+      <label class="field">Folds (walk-forward)<input id="oFolds" type="number" min="2" max="10" value="4"></label>
+      <label class="field">Min trades per trial<input id="oMin" type="number" min="1" value="20"></label>
+      <label class="field">Variants to keep<input id="oTop" type="number" min="1" max="10" value="3"></label>
+    </div>
+    <label class="field" style="margin-top:.8rem">Parameter grid (JSON: path → values, max 200 combinations)<textarea id="oGrid" class="code input" style="min-height:130px" placeholder='{"stop.mult": [1.0, 1.5, 2.0], "targets.0.value": [1.5, 2.0, 3.0]}'></textarea></label>
+    <div id="paths" class="small muted" style="margin:.5rem 0"></div>
+    <div class="row"><button class="btn btn-primary" id="optBtn">Start optimisation</button><span class="small muted" id="optMsg"></span></div>
+    <div class="progress" id="optProg" style="display:none;margin-top:.6rem"><span style="width:0"></span></div>
+  </div>
+  <div id="optResults"></div>
+</div>
+
+<div class="tab-panel" id="jobs"><div class="card flush"><div id="jobList"><div class="skeleton" style="height:120px"></div></div></div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+const pipOf = (s) => (s || "").toUpperCase().endsWith("JPY") ? 0.01 : 0.0001;
+const iso = (d) => d.toISOString().slice(0, 10);
+
+function ds() { const o = $("dataset")?.selectedOptions[0]; return o ? { id: o.value, tf: o.dataset.tf, first: o.dataset.first, last: o.dataset.last, symbol: o.dataset.symbol, cal: o.dataset.cal } : null; }
+function sync() {
+  const d = ds(), v = $("version")?.selectedOptions[0]; if (!d) return;
+  if (!$("symbol").value || $("symbol").dataset.auto) { $("symbol").value = d.symbol; $("symbol").dataset.auto = "1"; }
+  $("calendar").value = d.cal || "forex";
+  const mismatch = v && v.dataset.tf !== d.tf;
+  $("dsHint").innerHTML = mismatch ? `<span class="neg">Data is ${d.tf} but the strategy executes on ${v.dataset.tf}. Choose matching data.</span>` : `Covers ${d.first.slice(0,10)} → ${d.last.slice(0,10)}`;
+  $("runBtn").disabled = !!mismatch;
+  $("pipHint").textContent = `1 pip = ${pipOf($("symbol").value)} · spread ≈ ${($("spread").value / pipOf($("symbol").value)).toFixed(1)} pips`;
+  if (v) { const f = v.dataset.fid; $("fidelityNote").innerHTML = f === "FAITHFUL_TO_INSTRUCTOR" ? '<div class="banner ok" style="margin:0">Every material rule is source-confirmed: this can be described as a faithful test of the instructor\'s method on this history.</div>' : f === "USER_AUTHORED_RULES" ? '<div class="banner info" style="margin:0">Your own rules: results say nothing about an instructor\'s method.</div>' : '<div class="banner warn" style="margin:0"><strong>Contains approved assumptions / unsupported concepts.</strong> The result will be labelled <em>not a faithful instructor-method backtest</em>.</div>'; }
+}
+$("dataset")?.addEventListener("change", () => { $("quick").querySelector(".active")?.click(); sync(); });
+$("version")?.addEventListener("change", () => { sync(); loadPaths(); });
+$("symbol")?.addEventListener("input", () => { delete $("symbol").dataset.auto; sync(); }); $("spread")?.addEventListener("input", sync);
+$("quick")?.addEventListener("click", (e) => { const b = e.target.closest("button[data-m]"); if (!b) return; const d = ds(); if (!d) return; $("quick").querySelectorAll("button").forEach(x => x.classList.remove("active")); b.classList.add("active");
+  const last = new Date(d.last), end = new Date(last.getTime() + 86400000); $("end").value = iso(end);
+  if (b.dataset.m === "all") $("start").value = d.first.slice(0, 10); else { const s = new Date(end); s.setMonth(s.getMonth() - +b.dataset.m); $("start").value = iso(s < new Date(d.first) ? new Date(d.first) : s); } });
+
+function buildConfig() {
+  const d = ds(), cfg = { dataset_id: d.id, symbol: $("symbol").value.trim() || d.symbol, initial_capital: +$("capital").value, account_currency: $("ccy").value.trim().toUpperCase(),
+    costs: { spread: +$("spread").value || 0, slippage: +$("slip").value || 0, commission_model: $("commModel").value, commission_value: +$("commValue").value || 0, use_dataset_spread: $("useDs").checked },
+    same_bar_policy: $("policy").value, limit_fill: $("limitFill").value, calendar: $("calendar").value, display_tz: $("tz").value.trim(), causality_samples: +$("audit").value || 0 };
+  if ($("start").value) cfg.start = $("start").value; if ($("end").value) cfg.end = $("end").value; if ($("isEnd").value) cfg.in_sample_end = $("isEnd").value; if ($("pub").value) cfg.strategy_published_at = $("pub").value;
+  if ($("lev").value) cfg.leverage = +$("lev").value; if ($("conv").value) cfg.conversion_rate = +$("conv").value; if ($("fine").value) cfg.fine_dataset_id = $("fine").value;
+  if ($("iSize").value) cfg.instrument = { symbol: cfg.symbol, asset_class: $("iClass").value, contract_size: +$("iSize").value, tick_size: +$("iTick").value || 0.00001, quote_currency: $("iQuote").value || "USD", base_currency: $("iBase").value || null, min_qty: +$("iMin").value || 0.01, qty_step: +$("iStep").value || 0.01, max_qty: +$("iMax").value || 100, margin_rate: +$("iMargin").value || 0.02 };
+  const news = $("news").value.trim().split("\n").filter(Boolean).map(l => { const [start, end, label] = l.split(",").map(x => x.trim()); return { start, end, label }; }); if (news.length) cfg.news_blackouts = news;
+  return cfg;
+}
+function progress(bar, job) { bar.style.display = ""; bar.firstElementChild.style.width = job.progress + "%"; }
+$("runForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault(); $("runBtn").disabled = true; $("runMsg").textContent = "Queued…";
+  try { const job = await UI.api("/api/runs", { json: { versionId: $("version").value, config: buildConfig() } });
+    const done = await UI.pollJob(job.id, j => { $("runMsg").textContent = j.message; progress($("runProg"), j); }, 1200);
+    UI.toast(done.result.status === "VALID" ? "Backtest complete" : "Backtest FAILED validation — see the report", done.result.status === "VALID" ? "ok" : "bad"); location.href = "/runs/" + done.result.runId;
+  } catch (err) { UI.toast(err.message, "bad"); $("runMsg").textContent = err.message; $("runBtn").disabled = false; }
+});
+
+$("csvForm")?.addEventListener("submit", async (e) => { e.preventDefault(); try { await UI.api("/api/market-data/csv", { form: new FormData(e.target) }); UI.toast("Data imported", "ok"); location.hash = "data"; location.reload(); } catch (err) { UI.toast(err.message, "bad"); } });
+$("fetchForm")?.addEventListener("submit", async (e) => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); try { const job = await UI.api("/api/market-data/fetch", { json: f }); UI.toast("Download queued"); await UI.pollJob(job.id, j => progress($("fetchProg"), j), 2000); UI.toast("Data downloaded", "ok"); location.hash = "data"; location.reload(); } catch (err) { UI.toast(err.message, "bad"); } });
+document.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => { if (!confirm("Delete this data set?")) return; try { await UI.api("/api/market-data/" + b.dataset.del, { method: "DELETE" }); location.reload(); } catch (e) { UI.toast(e.message, "bad"); } });
+document.querySelectorAll("[data-q]").forEach(b => b.onclick = async () => { const q = await UI.api(`/api/market-data/${b.dataset.q}/quality`); const gaps = q.gaps.filter(g => !g.expectedClosure);
+  UI.drawer.open("Data quality", `<div class="kpis"><div class="kpi"><div class="label">Coverage</div><div class="value">${q.coveragePct}%</div></div><div class="kpi"><div class="label">Unexpected gaps</div><div class="value">${q.unexpectedGapCount}</div></div><div class="kpi"><div class="label">Missing bars</div><div class="value">${q.unexpectedMissingBars}</div></div></div><p class="small muted">${UI.esc(q.note)} Weekend/holiday closures (${q.calendar}) are not counted.</p>${gaps.length ? `<table><thead><tr><th>From</th><th>To</th><th class="num">Missing</th></tr></thead><tbody>${gaps.map(g => `<tr><td>${g.start.slice(0,16)}</td><td>${g.end.slice(0,16)}</td><td class="num">${g.missingBars}</td></tr>`).join("")}</tbody></table>` : '<div class="banner ok">No unexpected gaps.</div>'}`); });
+
+async function loadPaths() {
+  const id = $("version")?.value; if (!id) return; const v = await UI.api("/api/versions/" + id), out = [];
+  (function walk(o, p) { if (typeof o === "number") out.push(`${p} = ${o}`); else if (Array.isArray(o)) o.forEach((x, i) => walk(x, p ? `${p}.${i}` : String(i))); else if (o && typeof o === "object") for (const k in o) walk(o[k], p ? `${p}.${k}` : k); })(v.spec, "");
+  $("paths").innerHTML = "Numeric parameters you can vary: " + out.slice(0, 40).map(x => `<code>${UI.esc(x)}</code>`).join(" · ");
+}
+$("optBtn")?.addEventListener("click", async () => {
+  let grid; try { grid = JSON.parse($("oGrid").value); } catch (e) { UI.toast("The grid must be valid JSON", "bad"); return; }
+  $("optBtn").disabled = true; $("optMsg").textContent = "Queued…";
+  try { const job = await UI.api("/api/optimize", { json: { versionId: $("version").value, config: buildConfig(), grid, mode: $("oMode").value, objective: $("oObj").value, oosFraction: +$("oOos").value, folds: +$("oFolds").value, minTrades: +$("oMin").value, topK: +$("oTop").value } });
+    const done = await UI.pollJob(job.id, j => { $("optMsg").textContent = j.message; progress($("optProg"), j); }, 2500);
+    showOpt(await UI.api("/api/optimizations/" + done.result.optimizationId));
+  } catch (e) { UI.toast(e.message, "bad"); $("optMsg").textContent = e.message; }
+  $("optBtn").disabled = false;
+});
+function showOpt(o) {
+  const m = (x, k) => x && x[k] != null ? UI.num(x[k]) : "—";
+  if (o.kind === "walk_forward") { $("optResults").innerHTML = `<div class="card"><div class="card-title">Walk-forward result</div><div class="banner info">${UI.esc(o.warning)}</div><div class="kpis"><div class="kpi"><div class="label">Folds tested</div><div class="value">${o.stability.foldsTested}</div></div><div class="kpi"><div class="label">Profitable out-of-sample</div><div class="value">${o.stability.profitableFolds}/${o.stability.foldsTested}</div></div><div class="kpi"><div class="label">Different parameter sets</div><div class="value">${o.stability.paramChanges}</div></div></div>
+    <table><thead><tr><th>Fold</th><th>Train</th><th>Test (unseen)</th><th>Chosen</th><th class="num">Train ${o.objective}</th><th class="num">Test ${o.objective}</th><th class="num">Test trades</th><th class="num">Test net P&amp;L</th></tr></thead><tbody>${o.folds.map(f => `<tr><td>${f.fold}</td><td class="small">${f.train[0].slice(0,10)} → ${f.train[1].slice(0,10)}</td><td class="small">${f.test[0].slice(0,10)} → ${f.test[1].slice(0,10)}</td><td class="mono small">${f.chosen ? UI.esc(JSON.stringify(f.chosen)) : UI.esc(f.note)}</td><td class="num">${f.trainScore != null ? UI.num(f.trainScore, 3) : "—"}</td><td class="num">${f.testScore != null ? UI.num(f.testScore, 3) : "—"}</td><td class="num">${m(f.testMetrics, "totalTrades")}</td><td class="num ${UI.cls(f.testMetrics?.netPnl)}">${m(f.testMetrics, "netPnl")}</td></tr>`).join("")}</tbody></table></div>`; return; }
+  $("optResults").innerHTML = `<div class="card"><div class="card-title">Top parameter sets <span class="small muted" style="font-weight:400">(${o.combinations} tried in-sample; split at ${o.split.slice(0,10)})</span></div><div class="banner warn">${UI.esc(o.warning)}</div>
+    <table><thead><tr><th>Parameters</th><th class="num">In-sample ${o.objective}</th><th class="num">Out-of-sample ${o.objective}</th><th class="num">OOS trades</th><th class="num">OOS net P&amp;L</th><th>Verdict</th><th>Version</th></tr></thead><tbody>${o.top.map(r => `<tr><td class="mono small">${UI.esc(JSON.stringify(r.params))}</td><td class="num">${UI.num(r.score, 3)}</td><td class="num">${r.oosScore != null ? UI.num(r.oosScore, 3) : "—"}</td><td class="num">${m(r.outOfSample, "totalTrades")}</td><td class="num ${UI.cls(r.outOfSample?.netPnl)}">${m(r.outOfSample, "netPnl")}</td>
+      <td>${r.overfitWarning ? '<span class="pill bad">likely over-fit</span>' : '<span class="pill ok">held up</span>'}</td><td><a href="/editor?strategy=${o.strategyId}&version=${r.versionId}">${UI.esc(r.versionLabel)}</a></td></tr>`).join("")}</tbody></table></div>`;
+}
+async function jobs() { const list = await UI.api("/api/jobs"); $("jobList").innerHTML = list.length ? `<table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th><th></th></tr></thead><tbody>${list.map(j => `<tr><td>${UI.esc(j.label)}<div class="small muted">${UI.date(j.createdAt)}</div></td><td>${UI.statusPill(j.status)}</td><td style="min-width:120px"><div class="progress"><span style="width:${j.progress}%"></span></div></td><td class="small">${UI.esc(j.error || j.message || "")}</td><td>${j.status === "FAILED" ? `<button class="btn sm ghost" data-r="${j.id}">Retry</button>` : j.status === "QUEUED" ? `<button class="btn sm ghost" data-c="${j.id}">Cancel</button>` : ""}${j.kind === "backtest" && j.result?.runId ? `<a class="btn sm ghost" href="/runs/${j.result.runId}">Open</a>` : ""}</td></tr>`).join("")}</tbody></table>` : '<div class="empty">No jobs yet.</div>';
+  $("jobList").querySelectorAll("[data-r]").forEach(b => b.onclick = async () => { await UI.api(`/api/jobs/${b.dataset.r}/retry`, { method: "POST" }); jobs(); }); $("jobList").querySelectorAll("[data-c]").forEach(b => b.onclick = async () => { await UI.api(`/api/jobs/${b.dataset.c}/cancel`, { method: "POST" }); jobs(); }); }
+document.querySelector('[data-tab="jobs"]').addEventListener("click", jobs); setInterval(() => { if (document.getElementById("jobs").classList.contains("active") && !document.hidden) jobs(); }, 4000);
+sync(); loadPaths(); if ($("dataset")?.options.length) $("quick").querySelector('[data-m="12"]').click();
+</script>
+{% endblock %}

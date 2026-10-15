@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in · Trader Video Intelligence</title>
+  <script>try{var t=localStorage.getItem("theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}catch(e){}</script>
+  <link rel="stylesheet" href="/static/css/fonts.css"><link rel="stylesheet" href="/static/css/style.css"><link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <main class="login-wrap">
+    <div class="card login-card">
+      <img src="/static/img/logo.png" alt="Trader Intelligence - Research &amp; validation" style="width:100%;height:auto;margin-bottom:1rem;background:#fff;border-radius:8px">
+      {% if not auth_required %}
+        <div class="banner info">Authentication is disabled (local use). <a href="/">Open the workspace</a>.</div>
+      {% else %}
+      <form id="loginForm" class="stack" autocomplete="on">
+        <label class="field">Username<input name="username" id="u" autocomplete="username" required autofocus></label>
+        <label class="field">Password<input name="password" id="p" type="password" autocomplete="current-password" required></label>
+        <div id="err" class="small neg" role="alert"></div>
+        <button class="btn btn-primary" type="submit">Sign in</button>
+      </form>
+      <p class="small muted" style="margin-top:1rem">Accounts are created by an administrator. Repeated failed attempts lock sign-in temporarily.</p>
+      {% endif %}
+    </div>
+  </main>
+  <script>
+    document.getElementById("loginForm")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const err = document.getElementById("err"); err.textContent = "";
+      const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+        body: JSON.stringify({ username: document.getElementById("u").value, password: document.getElementById("p").value }) });
+      if (res.ok) { location.href = "/"; return; }
+      let detail = "Sign-in failed."; try { detail = (await res.json()).detail || detail; } catch (_) {}
+      err.textContent = detail;
+    });
+  </script>
+</body>
+</html>

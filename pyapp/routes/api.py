@@ -10,7 +10,7 @@ from pyapp.db import db
 from pyapp.ai import answer_rag, get_client, search_terms
 from pyapp.intelligence import aggregate_stats, build_patterns, retrieve
 from pyapp.media import media_processor
-from pyapp.youtube import canonical_url
+from pyapp.youtube import parse_source
 
 router = APIRouter(prefix="/api", tags=["API"])
 
@@ -73,24 +73,28 @@ async def get_video(video_id: str):
     video = await db.get_video(video_id)
     if not video:
         raise HTTPException(404, "Video not found")
-    return {"video": video, "trades": await db.get_trades(video_id), "events": video.get("detectedEvents", []), "transcript": video.get("transcript", [])}
+    details = await db.get("video_details", video["id"]) or {}
+    return {"video": video, "trades": await db.get_trades(video["id"]), "events": details.get("events") or video.get("detectedEvents", []), "transcript": details.get("transcript") or video.get("transcript", [])}
 
 @router.post("/ingest", status_code=202)
 async def ingest_video(req: IngestRequest):
+    """Accepts a video, playlist or channel URL (kept for the header button; /api/sources is the richer entry point)."""
     try:
-        url, playlist = canonical_url(req.url)
+        parsed = parse_source(req.url)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     require_processing()
+    url = parsed["url"]
     for job in await db.list("ingestions"):
         if job["url"] == url and job["status"] in ("QUEUED", "RESOLVING"):
-            return {"status": "queued", "jobId": job["id"], "message": "Already queued"}
-    job = {"id": uuid4().hex, "url": url, "isPlaylist": playlist, "status": "QUEUED", "createdAt": datetime.now(timezone.utc).isoformat()}
+            return {"status": "queued", "jobId": job["id"], "kind": parsed["kind"], "message": "Already queued"}
+    job = {"id": uuid4().hex, "url": url, "kind": parsed["kind"], "isPlaylist": parsed["kind"] != "video", "status": "QUEUED", "createdAt": datetime.now(timezone.utc).isoformat()}
     await db.save("ingestions", job)
-    return {"status": "queued", "jobId": job["id"], "message": "Playlist discovery queued" if playlist else "Video discovery queued"}
+    return {"status": "queued", "jobId": job["id"], "kind": parsed["kind"], "message": {"video": "Video discovery queued", "playlist": "Playlist discovery queued", "channel": "Channel discovery queued"}[parsed["kind"]]}
 
-@router.get("/jobs")
-async def jobs():
+@router.get("/pipeline")
+async def pipeline_status():
+    """Discovery queue plus per-video pipeline state (the generic job list is /api/jobs)."""
     return {"ingestions": await db.list("ingestions"), "videos": await db.get_jobs()}
 
 @router.post("/ingestions/{identifier}/retry")

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Media · Trader Video Intelligence{% endblock %}
+{% block page_title %}Media{% endblock %}
+{% block page_subtitle %}Upload videos, audio, charts, screenshots and documents. Your files are private to your account.{% endblock %}
+{% block content %}
+<div class="grid cols-2">
+  <div class="card">
+    <div class="card-title">Upload</div>
+    <label class="field" id="drop" style="border:2px dashed var(--line, #cbd5e1);border-radius:12px;padding:1.4rem;text-align:center;cursor:pointer;display:block">
+      <strong>Drop files here or click to choose</strong>
+      <div class="small muted" id="allowed" style="margin-top:.35rem"></div>
+      <input type="file" id="pick" multiple style="display:none">
+    </label>
+    <label class="field" style="margin-top:.7rem">Note (optional)<input class="input" id="note" maxlength="300" placeholder="e.g. NIFTY scalping session, 12 Oct"></label>
+    <div id="queue" class="stack" style="margin-top:.7rem"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Storage</div>
+    <div id="usage"><div class="skeleton" style="height:90px"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row between"><div class="card-title" style="margin:0">Your files</div>
+    <div class="row"><select class="input" id="kind" style="width:150px"><option value="">All types</option><option>video</option><option>audio</option><option>image</option><option>document</option></select></div></div>
+  <div id="files" style="margin-top:.7rem"><div class="skeleton" style="height:120px"></div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(2) + " GB" : b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : (b / 1024).toFixed(0) + " KB";
+let items = [];
+
+function renderUsage(u) {
+  const pct = Math.min(100, Math.round(100 * u.usedBytes / u.quotaBytes));
+  $("usage").innerHTML = `<div class="row between"><strong>${fmt(u.usedBytes)}</strong><span class="small muted">of ${fmt(u.quotaBytes)}</span></div>
+    <div class="progress" style="margin:.5rem 0"><span style="width:${pct}%"></span></div>
+    <table><tbody>
+      <tr><td class="muted">Files</td><td>${u.files} / ${u.maxFiles}</td></tr>
+      <tr><td class="muted">Largest single file</td><td>${fmt(u.maxFileBytes)}</td></tr>
+      <tr><td class="muted">Server disk free</td><td>${u.diskFreeMb >= 1024 ? (u.diskFreeMb / 1024).toFixed(1) + " GB" : u.diskFreeMb + " MB"}</td></tr>
+    </tbody></table>`;
+  $("allowed").textContent = "Allowed: " + u.allowed.join(" ") + " · max " + fmt(u.maxFileBytes) + " per file";
+}
+
+function renderFiles() {
+  const kind = $("kind").value, rows = items.filter((f) => !kind || f.kind === kind);
+  if (!rows.length) { $("files").innerHTML = '<p class="muted small">No files yet.</p>'; return; }
+  $("files").innerHTML = `<table><thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Added</th><th></th></tr></thead><tbody>` + rows.map((f) => `
+    <tr><td><strong>${UI.esc(f.name)}</strong>${f.note ? `<div class="small muted">${UI.esc(f.note)}</div>` : ""}</td>
+      <td><span class="pill">${UI.esc(f.kind)}</span></td><td>${fmt(f.size)}</td><td class="small">${UI.date(f.createdAt)}</td>
+      <td class="row" style="justify-content:flex-end;gap:.4rem">
+        <a class="btn sm ghost" href="/api/media/${f.id}/file" target="_blank" rel="noopener">${["video", "audio", "image"].includes(f.kind) || f.ext === ".pdf" ? "Open" : "Download"}</a>
+        <button class="btn sm ghost" data-del="${f.id}" data-name="${UI.esc(f.name)}">Delete</button></td></tr>`).join("") + "</tbody></table>";
+}
+
+async function load() {
+  const r = await UI.api("/api/media");
+  items = r.items; renderUsage(r.usage); renderFiles();
+}
+
+function upload(file) {
+  const row = document.createElement("div");
+  row.innerHTML = `<div class="row between small"><span>${UI.esc(file.name)}</span><span class="muted">waiting…</span></div><div class="progress"><span style="width:0%"></span></div>`;
+  $("queue").appendChild(row);
+  const status = row.querySelector(".muted"), bar = row.querySelector(".progress span");
+  return new Promise((resolve) => {
+    const form = new FormData();
+    form.append("file", file); form.append("note", $("note").value);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/media");
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) { const p = Math.round(100 * e.loaded / e.total); bar.style.width = p + "%"; status.textContent = p + "%"; } };
+    xhr.onload = () => {
+      let body = {}; try { body = JSON.parse(xhr.responseText); } catch (e) { /* not json */ }
+      if (xhr.status === 201) { bar.style.width = "100%"; status.textContent = body.duplicate ? "already uploaded (kept one copy)" : "done"; }
+      else if (xhr.status === 401) { location.href = "/login"; }
+      else { status.textContent = body.detail || ("failed (" + xhr.status + ")"); status.style.color = "var(--bad, #dc2626)"; bar.style.background = "var(--bad, #dc2626)"; }
+      resolve();
+    };
+    xhr.onerror = () => { status.textContent = "network error"; resolve(); };
+    xhr.send(form);
+  });
+}
+
+async function handle(files) {
+  for (const f of files) await upload(f);          // one at a time: kind to the server and to the 1 vCPU
+  $("note").value = ""; $("pick").value = ""; load();
+}
+
+$("pick").addEventListener("change", (e) => handle([...e.target.files]));
+const drop = $("drop");
+["dragover", "dragenter"].forEach((n) => drop.addEventListener(n, (e) => { e.preventDefault(); drop.style.background = "var(--mute-bg)"; }));
+["dragleave", "drop"].forEach((n) => drop.addEventListener(n, (e) => { e.preventDefault(); drop.style.background = ""; }));
+drop.addEventListener("drop", (e) => handle([...e.dataTransfer.files]));
+$("kind").addEventListener("change", renderFiles);
+$("files").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-del]"); if (!b) return;
+  if (!confirm(`Delete "${b.dataset.name}"? This cannot be undone.`)) return;
+  try { await UI.api("/api/media/" + b.dataset.del, { method: "DELETE" }); UI.toast("Deleted", "ok"); load(); } catch (err) { UI.toast(err.message, "bad"); }
+});
+load().catch((e) => UI.toast(e.message, "bad"));
+</script>
+{% endblock %}

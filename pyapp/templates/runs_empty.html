@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Trader Video Intelligence{% endblock %}
+{% block page_title %}{{ title }}{% endblock %}
+{% block page_subtitle %}Appears after your first backtest{% endblock %}
+{% block content %}
+<div class="card"><div class="empty">
+  <p><strong>No backtest has been run yet.</strong></p>
+  <p>Every simulated trade is journaled and analysed here: entry, stop, targets, costs, R-multiple, a plain-language explanation and a chart.</p>
+  <div class="row" style="justify-content:center"><a class="btn btn-primary" href="/editor">Write or approve a strategy</a><a class="btn btn-secondary" href="/backtest">Open the Backtesting Workspace</a></div>
+</div></div>
+{% endblock %}

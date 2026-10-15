@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Backtest runs · Trader Video Intelligence{% endblock %}
+{% block page_title %}Backtest runs{% endblock %}
+{% block page_subtitle %}Every run keeps its approved strategy version, data set, assumptions and audit results{% endblock %}
+{% block content %}
+<div class="card flush"><div id="list"><div class="skeleton" style="height:160px"></div></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(async () => {
+  const runs = await UI.api("/api/runs"), box = document.getElementById("list");
+  if (!runs.length) { box.innerHTML = '<div class="empty">No runs yet. Approve a strategy and use the <a href="/backtest">Backtesting Workspace</a>.</div>'; return; }
+  box.innerHTML = `<div class="table-responsive"><table data-sortable><thead><tr><th data-sort>Run</th><th data-sort>Instrument</th><th data-sort>Period</th><th class="num" data-sort>Trades</th><th class="num" data-sort>Win rate</th><th class="num" data-sort>Net P&amp;L</th><th class="num" data-sort>PF</th><th class="num" data-sort>Max DD</th><th>Fidelity</th><th>Status</th><th></th></tr></thead><tbody>
+  ${runs.map(r => `<tr class="clickable" data-href="/runs/${r.id}"><td><a href="/runs/${r.id}"><strong>${UI.esc(r.label || r.strategyName)}</strong></a><div class="small muted">${UI.esc(r.strategyVersion || "")} · ${UI.date(r.runDate)}</div></td><td>${UI.esc(r.symbol)} · ${r.timeframe}</td><td class="small">${r.dataRange.firstBar.slice(0, 10)} → ${r.dataRange.lastBar.slice(0, 10)}</td><td class="num">${r.metrics.totalTrades}</td><td class="num">${UI.pct(r.metrics.winRate)}</td><td class="num ${UI.cls(r.metrics.netPnl)}">${UI.money(r.metrics.netPnl)}</td><td class="num">${UI.num(r.metrics.profitFactor)}</td><td class="num">${UI.pct(r.metrics.maxDrawdownPct)}</td><td>${UI.statusPill(r.fidelity || "")}</td><td>${UI.statusPill(r.status)}</td><td><button class="btn sm ghost" data-del="${r.id}" aria-label="Delete run">✕</button></td></tr>`).join("")}</tbody></table></div>`;
+  UI.sortable(box.querySelector("table"));
+  box.querySelectorAll("tr[data-href]").forEach(tr => tr.addEventListener("click", (e) => { if (!e.target.closest("button,a")) location.href = tr.dataset.href; }));
+  box.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => { if (!confirm("Delete this run and its journal?")) return; await UI.api("/api/runs/" + b.dataset.del, { method: "DELETE" }); location.reload(); });
+})();
+</script>
+{% endblock %}

@@ -1,109 +1,74 @@
 {% extends "base.html" %}
-
-{% block title %}Dashboard | Forex Trader Video Intelligence{% endblock %}
-{% block page_title %}Forex Intelligence Dashboard{% endblock %}
-{% block page_subtitle %}Visual trade extraction, RAG reasoning, and observed strategy models{% endblock %}
+{% block title %}Dashboard · Trader Video Intelligence{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Source coverage, strategy pipeline and recent validated research{% endblock %}
 
 {% block content %}
-<!-- Top Stats Row -->
-<div class="grid-stats">
-  <div class="stat-card">
-    <div class="stat-label">Analyzed Videos</div>
-    <div class="stat-value" style="color: var(--accent-cyan);">{{ stats.analyzedVideos }} / {{ stats.totalVideos }}</div>
-    <div class="stat-meta">{{ stats.hoursAnalyzed }} hours of live trading</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Extracted Trades</div>
-    <div class="stat-value">{{ stats.totalTrades }}</div>
-    <div class="stat-meta">Review validation status per trade</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Observed Win Rate</div>
-    <div class="stat-value" style="color: var(--accent-green);">{{ (stats.winRate|string + '%') if stats.winRate is not none else 'Unknown' }}</div>
-    <div class="stat-meta">Known observed outcomes; includes replay/paper examples</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Active Pipelines</div>
-    <div class="stat-value" style="color: var(--accent-amber);">{{ stats.activePipelines }}</div>
-    <div class="stat-meta">Queue & background workers</div>
-  </div>
+{% if not runtime_ai_configured %}<div class="banner warn"><strong>AI analysis is not configured.</strong> Set <code>GEMINI_API_KEY</code> and keep <code>MOCK_AI_MODE=false</code>. Backtesting with your own strategies and market data works without it.</div>{% endif %}
+
+<div class="kpis">
+  <div class="kpi"><div class="label">Channels imported</div><div class="value">{{ d.channels }}</div><div class="sub">{{ d.sources }} source{{ '' if d.sources == 1 else 's' }} in total</div></div>
+  <div class="kpi"><div class="label">Videos discovered</div><div class="value">{{ d.videosDiscovered }}</div></div>
+  <div class="kpi"><div class="label">Successfully analysed</div><div class="value">{{ d.videosAnalyzed }}</div><div class="sub">of {{ d.videosDiscovered }} discovered</div></div>
+  <div class="kpi"><div class="label">Active tasks</div><div class="value">{{ d.activeTasks }}</div><div class="sub">queued or running</div></div>
+  <div class="kpi"><div class="label">Failed tasks</div><div class="value {% if d.failedTasks %}neg{% endif %}">{{ d.failedTasks }}</div><div class="sub"><a href="/sources">review</a></div></div>
+  <div class="kpi"><div class="label">Strategies found</div><div class="value">{{ d.strategiesFound }}</div></div>
+  <div class="kpi"><div class="label">Awaiting review</div><div class="value">{{ d.strategiesAwaitingReview }}</div><div class="sub"><a href="/library">open library</a></div></div>
+  <div class="kpi"><div class="label">Backtest-ready</div><div class="value">{{ d.strategiesBacktestReady }}</div></div>
+  <div class="kpi"><div class="label">Backtests completed</div><div class="value">{{ d.backtestsCompleted }}</div><div class="sub">{% if d.backtestsInvalid %}<span class="neg">{{ d.backtestsInvalid }} invalid</span>{% else %}all valid{% endif %}</div></div>
 </div>
 
-<!-- Main Split Section -->
-<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
-  <!-- Left: Recent Extracted Trades -->
-  <div class="card">
-    <div class="card-title">
-      <span>Recent Validated Trades</span>
-      <a href="/trades" class="btn btn-secondary" style="padding: 0.35rem 0.65rem; font-size: 0.75rem;">View All Trades</a>
+<div class="split">
+  <div>
+    <div class="card">
+      <div class="card-title"><span>Video processing</span><a class="small" href="/videos">Video library →</a></div>
+      {% set states = [('completed','Completed','var(--ok)'),('analyzing','Analyzing','var(--chart-a)'),('queued','Queued','var(--chart-c)'),('awaiting_permission','Awaiting permission','var(--chart-d)'),('failed','Failed','var(--bad)'),('unavailable','Unavailable','#64748b'),('skipped','Skipped','#94a3b8'),('discovered','Discovered','#cbd5e1')] %}
+      {% if d.videosDiscovered %}
+      <div class="progress stacked" role="img" aria-label="Video states">
+        {% for key, label, color in states %}{% if d.videoStates.get(key) %}<span style="width: {{ (100 * d.videoStates[key] / d.videosDiscovered)|round(1) }}%; --c: {{ color }}" title="{{ label }}: {{ d.videoStates[key] }}"></span>{% endif %}{% endfor %}
+      </div>
+      <div class="legend">{% for key, label, color in states %}{% if d.videoStates.get(key) %}<span><i style="background:{{ color }}"></i>{{ label }} {{ d.videoStates[key] }}</span>{% endif %}{% endfor %}</div>
+      {% else %}<div class="empty">No videos yet. <a href="#" onclick="openIngestModal();return false">Add a video, playlist or channel</a> to begin.</div>{% endif %}
     </div>
-    <div class="table-responsive">
-      <table>
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th>Type</th>
-            <th>Entry</th>
-            <th>SL / TP</th>
-            <th>R:R</th>
-            <th>Result</th>
-            <th>Setup</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for trade in trades[:5] %}
-          <tr>
-            <td><strong>{{ trade.symbol }}</strong></td>
-            <td>
-              <span class="badge {% if trade.direction == 'LONG' %}badge-long{% else %}badge-short{% endif %}">
-                {{ trade.direction }}
-              </span>
-            </td>
-            <td><code>{{ trade.entry or '-' }}</code></td>
-            <td>
-              <span style="font-size: 0.75rem; color: #ef4444;">{{ trade.sl or '-' }}</span> /
-              <span style="font-size: 0.75rem; color: #10b981;">{{ trade.tp or '-' }}</span>
-            </td>
-            <td><strong>{{ trade.rr if trade.rr is not none else 'Unknown' }}{% if trade.rr is not none %}R{% endif %}</strong></td>
-            <td>
-              <span class="badge {% if trade.result == 'WIN' %}badge-win{% elif trade.result == 'LOSS' %}badge-loss{% else %}badge-uncertain{% endif %}">
-                {{ trade.result }}
-              </span>
-            </td>
-            <td style="color: var(--text-muted); font-size: 0.8rem;">{{ trade.setup }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+
+    <div class="card flush">
+      <div class="card-title" style="padding:1rem 1rem 0"><span>Recent backtests</span><a class="small" href="/runs">All runs →</a></div>
+      {% if d.recentRuns %}
+      <div class="table-responsive"><table>
+        <thead><tr><th>Run</th><th>Instrument</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Net P&amp;L</th><th>Status</th></tr></thead>
+        <tbody>{% for r in d.recentRuns %}
+          <tr class="clickable" onclick="location.href='/runs/{{ r.id }}'"><td><a href="/runs/{{ r.id }}">{{ r.label or (r.strategyName ~ ' ' ~ (r.strategyVersion or '')) }}</a><div class="small muted">{{ r.runDate[:10] }}</div></td>
+            <td>{{ r.symbol }} · {{ r.timeframe }}</td><td class="num">{{ r.trades }}</td><td class="num">{{ r.winRate if r.winRate is not none else '—' }}{% if r.winRate is not none %}%{% endif %}</td>
+            <td class="num {{ 'pos' if r.netPnl > 0 else 'neg' if r.netPnl < 0 }}">{{ '{:,.2f}'.format(r.netPnl) }}</td>
+            <td><span class="pill {{ 'ok' if r.status == 'VALID' else 'bad' }}">{{ r.status|lower }}</span></td></tr>
+        {% endfor %}</tbody></table></div>
+      {% else %}<div class="empty">No backtests yet. Approve a strategy version, then run it on market data in the <a href="/backtest">Backtesting Workspace</a>.</div>{% endif %}
     </div>
   </div>
 
-  <!-- Right: Strategy Breakdown & Contradictions -->
   <div>
     <div class="card">
-      <div class="card-title">
-        <span>Observed Contradictions</span>
-      </div>
-      <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 1rem;">
-        Discrepancies identified between spoken rules and actual charted trade executions:
-      </p>
-      {% for c in contradictions %}
-      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 0.85rem; margin-bottom: 0.75rem;">
-        <div style="font-size: 0.78rem; font-weight: 600; color: #b45309; margin-bottom: 0.25rem;">Spoken Rule:</div>
-        <div style="font-size: 0.82rem; color: #1e293b; margin-bottom: 0.5rem; font-style: italic;">"{{ c.a }}"</div>
-        <div style="font-size: 0.78rem; font-weight: 600; color: #b91c1c; margin-bottom: 0.25rem;">Observed Reality:</div>
-        <div style="font-size: 0.82rem; color: #1e293b; font-style: italic;">"{{ c.b }}"</div>
-      </div>
-      {% endfor %}
+      <div class="card-title">Background jobs</div>
+      {% for j in d.activeJobs %}
+      <div style="margin-bottom:.8rem"><div class="row between small"><strong>{{ j.label }}</strong><span class="pill {{ 'info' if j.status == 'RUNNING' else '' }}">{{ j.status|lower }}</span></div>
+        <div class="progress" style="margin:.3rem 0"><span style="width: {{ j.progress }}%"></span></div><div class="small muted">{{ j.message }}</div></div>
+      {% else %}<div class="empty" style="padding:1rem">Nothing running.</div>{% endfor %}
     </div>
-
-    <!-- AI Cost Efficiency Card -->
     <div class="card">
-      <div class="card-title">
-        <span>Measured AI Usage</span>
-      </div>
-      <p>{{ usage.calls }} structured AI calls · {{ usage.tokens }} reported tokens</p>
-      <p class="chart-note">Actual billing depends on model, media and provider pricing. Check Google AI Studio for charges.</p>
+      <div class="card-title">Latest exported journals</div>
+      {% for e in d.latestJournals %}<div class="small" style="margin-bottom:.4rem"><span class="pill info">{{ e.kind }}</span> <a href="/runs/{{ e.runId }}#export">run {{ e.runId[:8] }}</a> · {{ e.at[:16]|replace('T',' ') }}{% if e.url %} · <a href="{{ e.url }}" target="_blank" rel="noopener">open sheet ↗</a>{% endif %}</div>
+      {% else %}<div class="empty" style="padding:1rem">No exports yet.</div>{% endfor %}
+    </div>
+    <div class="card">
+      <div class="card-title">Workflow</div>
+      <ol class="steps small">
+        <li><a href="/sources">Add a channel or video</a> — analysed with speech <em>and</em> chart frames.</li>
+        <li><a href="/library">Review strategy manuals</a> — every rule carries a verified quote and timestamp.</li>
+        <li><a href="/qa">Ask questions</a> — answers cite the original video moment.</li>
+        <li><a href="/editor">Approve an executable version</a> — assumptions need your explicit sign-off.</li>
+        <li><a href="/backtest">Run a causal backtest</a> — lookahead-audited and reproducible.</li>
+        <li><a href="/journal">Study every trade</a>, then export to Excel / Google Sheets.</li>
+      </ol>
     </div>
   </div>
 </div>

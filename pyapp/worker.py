@@ -1,80 +1,95 @@
-"""Restart-safe local queue. Run one web process with configured worker concurrency."""
+"""Restart-safe local queue. Run one web process; per-user queues are served fairly with global concurrency limits."""
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from pyapp.config import settings
-from pyapp.db import db
+from pyapp.db import db, owner_var
 from pyapp.media import media_processor, blocking_call
 from pyapp.pipeline import process_video_pipeline
+from pyapp import budget, jobs, limits, maintenance
+from pyapp.sources import expand_ingestion  # noqa: F401  (re-exported for callers and tests)
 
 logger = logging.getLogger(__name__)
+JOB_CONCURRENCY = 2
+MAINTENANCE_EVERY = 6 * 3600
+_paused_logged: set = set()
 
-async def expand_ingestion(job):
-    job.update(status="RESOLVING")
-    await db.save("ingestions", job)
-    try:
-        info = await blocking_call(media_processor.get_info, job["url"], job["isPlaylist"])
-        playlist_id = None
-        if info.get("isPlaylist"):
-            playlist_id = info["playlistId"]
-            await db.save("playlists", {"id": playlist_id, "title": info["title"], "channel": info.get("channel") or "Unknown", "videoCount": info["videoCount"], "url": job["url"]})
-            videos = info["videos"]
-        else:
-            videos = [info]
-        count = 0
-        for item in videos:
-            youtube_id = item.get("youtubeId")
-            if not youtube_id:
-                continue
-            identifier = "video-" + youtube_id
-            existing = await db.get_video(identifier)
-            if existing:
-                if playlist_id and playlist_id not in existing.get("playlistIds", []):
-                    existing.setdefault("playlistIds", []).append(playlist_id)
-                    await db.save_video(existing)
-                continue
-            await db.save_video({"id": identifier, "youtubeId": youtube_id, "title": item.get("title") or youtube_id,
-                "duration": item.get("duration") or 0, "channel": info.get("channel") or "Unknown", "status": "QUEUED",
-                "progress": 0, "trades": 0, "events": 0, "thumbnail": item.get("thumbnail") or f"https://i.ytimg.com/vi/{youtube_id}/hqdefault.jpg",
-                "playlistIds": [playlist_id] if playlist_id else [], "sourceUrl": f"https://www.youtube.com/watch?v={youtube_id}",
-                "published": "Unknown", "updatedAt": datetime.now(timezone.utc).isoformat()})
-            count += 1
-        job.update(status="COMPLETED", videoCount=len(videos), queuedCount=count, error=None)
-    except asyncio.CancelledError:
-        job["status"] = "QUEUED"
-        raise
-    except Exception as exc:
-        logger.exception("Playlist expansion failed")
-        job.update(status="FAILED", error=str(exc))
-    finally:
-        await db.save("ingestions", job)
 
-async def run_worker():
-    tasks = {}
+async def recover_owner():
     for video in await db.get_videos():
-        if video["status"] not in ("COMPLETED", "FAILED", "QUEUED"):
+        if video["status"] not in ("COMPLETED", "FAILED", "QUEUED", "UNAVAILABLE", "AWAITING_PERMISSION", "SKIPPED"):
             video["status"] = "QUEUED"
             await db.save_video(video)
     for job in await db.list("ingestions"):
         if job["status"] == "RESOLVING":
             job["status"] = "QUEUED"
             await db.save("ingestions", job)
+    await jobs.recover()
+
+
+async def tick_owner(tasks, owner):
+    for job in reversed(await db.query("ingestions", {"status": "QUEUED"})):
+        await expand_ingestion(job)
+        break
+    paused = await budget.blocked("video") or limits.storage_problem()      # running work finishes; nothing new starts until the cap clears
+    if paused and owner not in _paused_logged:
+        logger.warning("New analysis paused for %r: %s", owner, paused)
+        _paused_logged.add(owner)
+    elif not paused:
+        _paused_logged.discard(owner)
+    running_videos = sum(1 for key in tasks if key[1] == "video")
+    if not paused:
+        for video in reversed(await db.query("videos", {"status": "QUEUED"})):
+            if running_videos >= settings.VIDEO_PROCESS_CONCURRENCY:
+                break
+            key = (owner, "video", video["id"])
+            if key not in tasks and video.get("notBefore", 0) <= time.time():
+                tasks[key] = asyncio.create_task(process_video_pipeline(video["id"], video["sourceUrl"]))
+                running_videos += 1
+    running_jobs = sum(1 for key in tasks if key[1] == "job")
+    while running_jobs < JOB_CONCURRENCY:
+        job = await jobs.next_queued()
+        key = (owner, "job", job["id"]) if job else None
+        if not job or key in tasks:
+            break
+        job["status"] = "RUNNING"          # claim immediately so the next tick does not start it twice
+        await db.save("jobs", job)
+        tasks[key] = asyncio.create_task(jobs.run_job(job))
+        running_jobs += 1
+
+
+async def run_worker():
+    tasks, owners, refreshed, last_maintenance = {}, [""], 0.0, 0.0
+    for owner in await db.owners():
+        token = owner_var.set(owner)
+        try:
+            await recover_owner()
+        finally:
+            owner_var.reset(token)
     try:
         while True:
             for key, task in list(tasks.items()):
                 if task.done():
                     if not task.cancelled() and task.exception():
-                        logger.error("Worker task failed: %s", task.exception())
+                        logger.error("Worker task %s failed: %s", key, task.exception())
                     del tasks[key]
-            for job in await db.list("ingestions"):
-                if job["status"] == "QUEUED":
-                    await expand_ingestion(job)
-                    break
-            for video in reversed(await db.get_videos()):
-                if len(tasks) >= settings.VIDEO_PROCESS_CONCURRENCY:
-                    break
-                if video["status"] == "QUEUED" and video["id"] not in tasks:
-                    tasks[video["id"]] = asyncio.create_task(process_video_pipeline(video["id"], video["sourceUrl"]))
+            if time.time() - refreshed > 10:
+                owners, refreshed = await db.owners(), time.time()
+            if time.time() - last_maintenance > MAINTENANCE_EVERY:
+                last_maintenance = time.time()
+                try:
+                    await maintenance.run_once()
+                except Exception:
+                    logger.exception("Maintenance run failed")
+            for owner in owners:
+                token = owner_var.set(owner)
+                try:
+                    await tick_owner(tasks, owner)
+                except Exception:
+                    logger.exception("Worker tick failed for owner %r", owner)
+                finally:
+                    owner_var.reset(token)
             await asyncio.sleep(1)
     finally:
         for task in tasks.values():

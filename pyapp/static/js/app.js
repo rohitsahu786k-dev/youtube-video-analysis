@@ -1,47 +1,4 @@
-// Modal handling
-function openIngestModal() {
-  const m = document.getElementById("ingestModal");
-  if (m) m.classList.add("active");
-}
-
-function closeIngestModal() {
-  const m = document.getElementById("ingestModal");
-  if (m) m.classList.remove("active");
-}
-
-async function handleIngestSubmit(event) {
-  event.preventDefault();
-  const input = document.getElementById("youtubeUrlInput");
-  const statusMsg = document.getElementById("ingestStatus");
-  const url = input.value.trim();
-  if (!url) return;
-
-  statusMsg.innerText = "Queueing ingestion pipeline...";
-  statusMsg.style.color = "#38bdf8";
-
-  try {
-    const res = await fetch("/api/ingest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url })
-    });
-    const data = await res.json();
-    if (res.ok) {
-      statusMsg.innerText = "Ingestion queued! Redirecting to pipeline...";
-      statusMsg.style.color = "#10b981";
-      setTimeout(() => {
-        window.location.href = "/processing";
-      }, 1000);
-    } else {
-      statusMsg.innerText = data.detail || "Ingestion failed";
-      statusMsg.style.color = "#ef4444";
-    }
-  } catch (err) {
-    statusMsg.innerText = "Network error: " + err.message;
-    statusMsg.style.color = "#ef4444";
-  }
-}
-
+// Legacy chat (Research tools) and retry buttons. Modal / ingest handling lives in ui.js.
 // Chat functionality
 async function sendChatMessage() {
   const input = document.getElementById("chatInput");

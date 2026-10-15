@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}AI Trading Q&A · Trader Video Intelligence{% endblock %}
+{% block page_title %}AI Trading Q&amp;A{% endblock %}
+{% block page_subtitle %}Answers come only from your analysed videos — every claim links to the original moment{% endblock %}
+
+{% block content %}
+{% if not runtime_ai_configured %}<div class="banner warn">AI answers are not configured. Questions still return the closest matching passages from your videos (no synthesis).</div>{% endif %}
+<div class="chat-layout">
+  <aside class="card chat-list">
+    <label class="field">Scope<select id="scope"><option value="">All strategies &amp; videos (cross-video)</option>{% for s in strategies %}<option value="{{ s.id }}" {% if scope == s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label>
+    <button class="btn btn-secondary sm" id="newChat" style="margin:.7rem 0;width:100%">＋ New conversation</button>
+    <div id="threads"></div>
+  </aside>
+  <section class="card" style="display:flex;flex-direction:column;padding:0">
+    <div class="chat-thread" id="thread" aria-live="polite"></div>
+    <form id="askForm" class="row" style="padding:.8rem;border-top:1px solid var(--border-subtle)">
+      <input id="question" class="input" style="flex:1" placeholder="Ask in English, Hindi or Hinglish — e.g. “Stop loss us candle ke neeche kyun?”" autocomplete="off" aria-label="Your question" maxlength="2000">
+      <button class="btn btn-primary" id="askBtn" type="submit">Ask</button>
+    </form>
+  </section>
+</div>
+<div class="card small muted" style="margin-top:1rem">Answers separate <strong>what the teacher said</strong> (cited) from an optional <strong>general educational note</strong> (not from the sources). If the sources do not answer, the assistant says what is missing rather than guessing. Contradictions between videos are shown, not resolved.</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+let current = null;
+const SAMPLE = ["What confirms the entry?", "Why is the stop placed there?", "Can this setup be traded in the Asian session?", "What if structure breaks but there is no retest?", "When must I avoid the trade?", "Which video explains the risk rule?"];
+
+function renderEvidence(items) {
+  return items.length ? `<details style="margin-top:.6rem"><summary class="small"><strong>${items.length} source${items.length > 1 ? "s" : ""}</strong></summary>${items.map(e => `
+    <div style="margin:.5rem 0;padding:.5rem .7rem;border:1px solid var(--border-subtle);border-radius:6px">
+      <div class="row between small"><span><span class="pill info">${e.id}</span> ${UI.esc(e.video || "")} ${e.time != null ? `· ${UI.mmss(e.time)}` : ""}</span>
+        <span class="row">${e.provenance === "source_confirmed" ? '<span class="pill ok">source-confirmed</span>' : e.provenance === "missing_unclear" ? '<span class="pill warn">unverified</span>' : ""}
+        ${e.kind === "atom" ? `<button class="btn sm ghost" data-evidence="${UI.esc(e.key)}" data-kind="atom">Show Source Evidence</button>` : e.kind === "spoken" || e.kind === "visual" ? `<button class="btn sm ghost" data-evidence="${UI.esc(e.key)}" data-kind="knowledge">Show Source Evidence</button>` : ""}</span></div>
+      <div class="small">${UI.esc(e.text)}</div>${e.quote ? `<div class="quote">“${UI.esc(e.quote)}”</div>` : ""}
+      ${e.frames && e.frames.length ? `<div class="frame-strip">${e.frames.map(f => `<a href="${UI.esc(f.url)}" target="_blank" rel="noopener"><img src="${UI.esc(f.url)}" alt="Chart frame" loading="lazy"></a>`).join("")}</div>` : ""}</div>`).join("")}</details>` : "";
+}
+function renderAnswer(m) {
+  const a = m.answer || {};
+  let html = "";
+  if (a.insufficient || !a.sourceBasedAnswer) html += `<div class="banner warn" style="margin:0 0 .6rem"><strong>The sources do not answer this.</strong> ${UI.esc(a.missing || "")}</div>`;
+  if (a.sourceBasedAnswer) html += `<div style="white-space:pre-wrap">${UI.esc(a.sourceBasedAnswer).replace(/\[E(\d+)\]/g, '<span class="pill info" title="Evidence E$1">E$1</span>')}</div>`;
+  if (a.steps && a.steps.length) html += `<ol class="steps small" style="margin-top:.5rem">${a.steps.map(s => `<li>${UI.esc(s)}</li>`).join("")}</ol>`;
+  if (a.conflicts && a.conflicts.length) html += `<div class="banner bad" style="margin:.6rem 0 0"><strong>Conflicting explanations:</strong><br>${a.conflicts.map(c => UI.esc(c)).join("<br>")}</div>`;
+  if (a.generalEducation) html += `<div class="general-note"><strong>General educational note — not from your sources:</strong> ${UI.esc(a.generalEducation)}</div>`;
+  if (a.validationNotes && a.validationNotes.length) html += `<div class="small muted" style="margin-top:.4rem">${a.validationNotes.map(UI.esc).join(" ")}</div>`;
+  html += renderEvidence(m.evidence || []);
+  if (a.followUps && a.followUps.length) html += `<div class="row" style="margin-top:.6rem">${a.followUps.map(f => `<button class="btn sm ghost" data-follow="${UI.esc(f)}">${UI.esc(f)}</button>`).join("")}</div>`;
+  return html;
+}
+function draw(thread) {
+  const box = $("thread");
+  if (!thread || !thread.messages.length) { box.innerHTML = `<div class="empty"><p>Ask a question about your analysed videos.</p><div class="row" style="justify-content:center">${SAMPLE.map(q => `<button class="btn sm ghost" data-follow="${UI.esc(q)}">${UI.esc(q)}</button>`).join("")}</div></div>`; }
+  else box.innerHTML = thread.messages.map(m => m.role === "user" ? `<div class="bubble user">${UI.esc(m.text)}</div>` : `<div class="bubble ai">${renderAnswer(m)}</div>`).join("");
+  box.scrollTop = box.scrollHeight;
+  box.querySelectorAll("[data-follow]").forEach(b => b.onclick = () => { $("question").value = b.dataset.follow; $("askForm").requestSubmit(); });
+}
+async function threads() {
+  const list = await UI.api("/api/qa/conversations" + ($("scope").value ? "?strategyId=" + $("scope").value : ""));
+  $("threads").innerHTML = list.length ? list.map(c => `<div class="row between" style="margin-bottom:.35rem;flex-wrap:nowrap"><a href="#" data-c="${c.id}" class="small" style="${current === c.id ? "font-weight:700" : ""}">${UI.esc(c.title)}</a><button class="icon-btn" data-del="${c.id}" aria-label="Delete conversation">✕</button></div>`).join("") : '<div class="small muted">No conversations yet.</div>';
+  $("threads").querySelectorAll("[data-c]").forEach(a => a.onclick = (e) => { e.preventDefault(); open(a.dataset.c); });
+  $("threads").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => { if (!confirm("Delete this conversation?")) return; await UI.api("/api/qa/conversations/" + b.dataset.del, { method: "DELETE" }); if (current === b.dataset.del) { current = null; draw(null); } threads(); });
+}
+async function open(id) { current = id; draw(await UI.api("/api/qa/conversations/" + id)); threads(); }
+async function ensure() { if (!current) { const c = await UI.api("/api/qa/conversations", { json: { strategyId: $("scope").value || null } }); current = c.id; } return current; }
+$("newChat").onclick = () => { current = null; draw(null); $("question").focus(); };
+$("scope").onchange = () => { current = null; draw(null); threads(); };
+$("askForm").addEventListener("submit", async (e) => {
+  e.preventDefault(); const q = $("question").value.trim(); if (!q) return;
+  $("askBtn").disabled = true; $("question").value = "";
+  try {
+    const id = await ensure();
+    $("thread").insertAdjacentHTML("beforeend", `<div class="bubble user">${UI.esc(q)}</div><div class="bubble ai muted" id="pending">Searching your videos…</div>`); $("thread").scrollTop = $("thread").scrollHeight;
+    await UI.api(`/api/qa/conversations/${id}/ask`, { json: { question: q } });
+    await open(id);
+  } catch (err) { UI.toast(err.message, "bad"); document.getElementById("pending")?.remove(); }
+  $("askBtn").disabled = false; $("question").focus();
+});
+draw(null); threads();
+</script>
+{% endblock %}

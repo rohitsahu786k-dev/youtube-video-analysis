@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Strategy Library · Trader Video Intelligence{% endblock %}
+{% block page_title %}Strategy Library{% endblock %}
+{% block page_subtitle %}Every strategy found in your sources, with its complete evidence-cited manual{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="row between">
+    <div class="row">
+      <input class="input" id="q" style="width:260px" placeholder="Search strategies" aria-label="Search strategies">
+      <select class="input" id="status" style="width:170px" aria-label="Review status"><option value="">Any review status</option><option value="NEEDS_REVIEW">Needs review</option><option value="IN_REVIEW">In review</option><option value="REVIEWED">Reviewed</option></select>
+      <select class="input" id="readiness" style="width:210px" aria-label="Backtesting readiness"><option value="">Any readiness</option><option value="FULLY_BACKTESTABLE">Fully backtestable</option><option value="PARTIALLY_BACKTESTABLE">Partially backtestable</option><option value="NOT_RELIABLY_BACKTESTABLE">Not reliably backtestable</option><option value="USER_DEFINED">User-authored</option></select>
+      <select class="input" id="sort" style="width:170px" aria-label="Sort"><option value="rank">Best evidence first</option><option value="examples">Most examples</option><option value="name">Name</option><option value="recent">Recently updated</option></select>
+    </div>
+    <div class="row"><button class="btn ghost" id="custom">＋ Write my own</button><button class="btn btn-secondary" id="rebuild">Rebuild library</button></div>
+  </div>
+  <p class="small muted" style="margin:.7rem 0 0">Ranking weighs rule completeness, objectivity, evidence quality (verified quotes and captured frames), number of examples and backtest readiness. A strategy is the <em>teacher's</em> method: names keep the instructor's own terminology and similar methods are merged only when their meaning and conditions match.</p>
+</div>
+<div id="list"><div class="skeleton" style="height:180px"></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+async function load() {
+  const p = new URLSearchParams({ q: $("q").value, status: $("status").value, readiness: $("readiness").value, sort: $("sort").value });
+  for (const [k, v] of [...p]) if (!v) p.delete(k);
+  const rows = await UI.api("/api/library/strategies?" + p);
+  if (!rows.length) { $("list").innerHTML = `<div class="card"><div class="empty">No strategies yet. They appear after videos are analysed and the library is built (automatic after each video). Sources with no verifiable rules produce nothing — rules are never invented.<br><a href="/sources">Add a source</a> or write your own strategy.</div></div>`; return; }
+  $("list").innerHTML = `<div class="card flush"><div class="table-responsive"><table data-sortable><thead><tr><th data-sort>Strategy</th><th data-sort class="num">Evidence score</th><th data-sort class="num">Complete</th><th data-sort class="num">Videos</th><th data-sort class="num">Rules ✓/✗</th><th data-sort class="num">Examples</th><th>Readiness</th><th>Review</th></tr></thead><tbody>
+    ${rows.map(s => `<tr class="clickable" data-href="/library/${s.id}"><td><a href="/library/${s.id}"><strong>${s.starred ? "★ " : ""}${UI.esc(s.name)}</strong></a>${s.relation === "variation" ? `<div class="small muted">variation of ${UI.esc(s.variationOf || "")}</div>` : ""}${s.aliases.length ? `<div class="small muted">also: ${UI.esc(s.aliases.join(", "))}</div>` : ""}${s.orphaned ? '<div class="small neg">source evidence changed</div>' : ""}</td>
+      <td class="num" data-v="${s.rankScore}">${UI.num(s.rankScore, 0)}</td><td class="num" data-v="${s.completeness.score}">${s.completeness.score}%${s.completeness.missingCore.length ? `<div class="small neg">missing ${s.completeness.missingCore.join(", ")}</div>` : ""}</td>
+      <td class="num">${s.sourceVideos}</td><td class="num" data-v="${s.confirmedCount}">${s.confirmedCount}/${s.unverifiedCount}</td><td class="num">${s.exampleCount}</td>
+      <td>${s.readiness ? UI.statusPill(s.readiness) : '<span class="small muted">not translated</span>'}${s.conflicts ? `<div><span class="pill bad">${s.conflicts} conflict${s.conflicts > 1 ? "s" : ""}</span></div>` : ""}</td>
+      <td>${UI.statusPill(s.status)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  UI.sortable(document.querySelector("#list table"));
+  document.querySelectorAll("tr[data-href]").forEach(r => r.addEventListener("click", (e) => { if (!e.target.closest("a")) location.href = r.dataset.href; }));
+}
+["q","status","readiness","sort"].forEach(id => $(id).addEventListener(id === "q" ? "input" : "change", () => { clearTimeout(window.__t); window.__t = setTimeout(load, 200); }));
+$("rebuild").addEventListener("click", async () => { try { const job = await UI.api("/api/library/rebuild", { method: "POST" }); UI.toast("Rebuilding the library…"); $("rebuild").disabled = true; await UI.pollJob(job.id, j => $("rebuild").textContent = j.message.slice(0, 40)); UI.toast("Library rebuilt", "ok"); } catch (e) { UI.toast(e.message, "bad"); } $("rebuild").disabled = false; $("rebuild").textContent = "Rebuild library"; load(); });
+$("custom").addEventListener("click", async () => { const name = prompt("Name your strategy"); if (!name) return; try { const s = await UI.api("/api/library/custom", { json: { name } }); location.href = "/editor?strategy=" + s.id; } catch (e) { UI.toast(e.message, "bad"); } });
+load();
+</script>
+{% endblock %}

@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Strategy Editor &amp; Approval · Trader Video Intelligence{% endblock %}
+{% block page_title %}Strategy Editor &amp; Approval{% endblock %}
+{% block page_subtitle %}Review, clarify and approve an exact executable version — the instructor's original rules are never rewritten{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="row between">
+    <div class="row">
+      <label class="field">Strategy<select id="strategy" style="min-width:260px"><option value="">— choose —</option>{% for s in strategies %}<option value="{{ s.id }}" {% if strategy_id == s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label>
+      <label class="field">Version<select id="version" style="min-width:230px"><option value="">— new draft —</option></select></label>
+    </div>
+    <div class="row">
+      <button class="btn ghost sm" id="newCustom">＋ New strategy</button>
+      <select class="input" id="template" style="width:210px" aria-label="Insert template"><option value="">Insert example template…</option></select>
+      <button class="btn btn-secondary sm" id="translate" {% if not ai_ready %}disabled title="Needs GEMINI_API_KEY"{% endif %}>AI draft from source rules</button>
+    </div>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<div class="split">
+  <div>
+    <div class="card">
+      <div class="row between"><div class="card-title" style="margin:0">Executable rules (JSON)</div>
+        <div class="row"><button class="btn sm ghost" id="format">Format</button><button class="btn sm ghost" id="validate">Validate</button><button class="btn sm btn-primary" id="save">Save draft</button></div></div>
+      <div id="vresult" style="margin:.6rem 0"></div>
+      <textarea id="editor" class="code input" spellcheck="false" aria-label="Strategy rules JSON" placeholder='Choose a strategy, then paste or edit its executable rules. Use the template menu for a starting point.'></textarea>
+      <details style="margin-top:.7rem"><summary class="small"><strong>How rules are written</strong></summary>
+        <div class="small muted" style="margin-top:.5rem">Decisions happen at a candle <em>close</em>; orders execute from the next candle. <code>series</code> defines indicators and structure (EMA, ATR, swing, BOS/CHoCH, liquidity sweep, FVG, order block, sessions…). Conditions use <code>left/op/right</code>, <code>is</code>, <code>all/any/not</code> and ordered <code>seq</code>. Add <code>"tf":"H1"</code> to a series to use only the last <em>completed</em> higher-timeframe bar. The Validate button explains any problem in plain language. Rules you cannot express stay in the manual as "unsupported" — they are never faked.</div></details>
+    </div>
+    <div class="card">
+      <div class="card-title">Declared assumptions <span class="small muted" style="font-weight:400">— anything that is <em>not</em> a verified instructor statement</span></div>
+      <div id="assumptions"></div>
+      <form id="assumeForm" class="row" style="margin-top:.6rem">
+        <select class="input" id="aComp" style="width:140px" aria-label="Component"><option>entry</option><option>stop</option><option>targets</option><option>management</option><option>sessions</option><option>risk</option><option>timeframe</option><option>filters</option></select>
+        <input class="input" id="aText" style="flex:1;min-width:220px" placeholder="e.g. 'Stop = 1.5 × ATR(14); the teacher said “behind the swing” without a distance'" aria-label="Assumption">
+        <button class="btn sm btn-secondary" type="submit">Add</button>
+      </form>
+    </div>
+    <div class="card"><div class="card-title">Change log</div><div id="log" class="small"></div></div>
+  </div>
+  <div>
+    <div class="card" id="statusCard"><div class="card-title">Approval</div><div id="approval"><div class="empty">Select or create a version.</div></div></div>
+    <div class="card"><div class="card-title">Provenance of each component</div><div id="components" class="small"></div></div>
+    <div class="card"><div class="card-title">Original extracted manual <span class="small muted" style="font-weight:400">(read-only)</span></div><div id="manual" class="small"></div></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (id) => document.getElementById(id);
+let strategy = null, version = null, assumptions = [], components = {}, templates = {};
+const COMP_ORDER = ["timeframe", "entry", "stop", "targets", "management", "sessions", "risk", "filters"];
+
+function setStatus(html, kind = "info") { $("status").innerHTML = html ? `<div class="banner ${kind}">${html}</div>` : ""; }
+function editable() { return !version || version.status === "DRAFT"; }
+function parse() { try { return JSON.parse($("editor").value); } catch (e) { throw new Error("The JSON is not valid: " + e.message); } }
+
+async function loadStrategies(selectId) {
+  const id = $("strategy").value; strategy = null; $("version").innerHTML = '<option value="">— new draft —</option>';
+  if (!id) { renderManual(); return; }
+  strategy = await UI.api("/api/library/strategies/" + id);
+  $("version").innerHTML = '<option value="">— new draft —</option>' + strategy.versions.map(v => `<option value="${v.id}">${UI.esc(v.label)} · ${v.status.toLowerCase()}${v.kind === "optimized_variant" ? " · optimised variant" : ""}</option>`).join("");
+  renderManual();
+  if (selectId) { $("version").value = selectId; await loadVersion(); } else if (strategy.versions.length) { $("version").value = strategy.versions[0].id; await loadVersion(); } else { version = null; render(); }
+}
+async function loadVersion() {
+  const id = $("version").value;
+  if (!id) { version = null; assumptions = []; components = {}; $("editor").value = ""; render(); return; }
+  version = await UI.api("/api/versions/" + id);
+  $("editor").value = JSON.stringify(version.spec, null, 2); assumptions = version.assumptions; components = version.components; render();
+}
+function render() {
+  const draft = editable();
+  $("editor").readOnly = !draft; $("save").disabled = !draft || !strategy; $("save").textContent = version ? "Save draft" : "Create draft";
+  $("format").disabled = !draft;
+  setStatus(version && !draft ? `<strong>${UI.esc(version.label)} is ${version.status.toLowerCase()} and cannot be edited.</strong> Fork it to make changes — the approved version and every backtest that used it stay intact.` : "", "info");
+  // assumptions
+  $("assumptions").innerHTML = assumptions.length ? assumptions.map((a, i) => `<div class="check" style="margin-bottom:.5rem"><input type="checkbox" id="ack${i}" data-id="${a.id || ""}" ${a.approved ? "checked disabled" : ""} ${draft ? "" : "disabled"}><label for="ack${i}"><span class="pill warn">${UI.esc(a.component || "")}</span> ${UI.esc(a.text)}${a.reason ? `<div class="small muted">${UI.esc(a.reason)}</div>` : ""}${a.approvedBy ? `<div class="small muted">approved by ${UI.esc(a.approvedBy)}</div>` : ""}</label>${draft ? `<button class="icon-btn" data-rm="${i}" aria-label="Remove">✕</button>` : ""}</div>`).join("") : '<div class="small muted">None. Everything in the rules is supported by verified source statements, or is a run setting such as capital and risk %.</div>';
+  $("assumptions").querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { assumptions.splice(+b.dataset.rm, 1); render(); });
+  $("assumeForm").style.display = draft ? "" : "none";
+  // approval
+  if (!version) { $("approval").innerHTML = '<div class="empty">Create a draft first. Approval needs a saved version.</div>'; }
+  else {
+    const r = version.readiness || {};
+    $("approval").innerHTML = `<div class="row" style="margin-bottom:.5rem">${UI.statusPill(version.status)} ${UI.statusPill(r.level)} ${UI.statusPill(r.fidelity)}</div>
+      <ul class="small" style="padding-left:1.1rem;margin:0 0 .6rem">${(r.reasons || []).map(x => `<li>${UI.esc(x)}</li>`).join("")}</ul>
+      ${(version.unsupported || []).length ? `<div class="banner warn"><strong>Not reproduced by the engine:</strong> ${version.unsupported.map(UI.esc).join("; ")}</div>` : ""}
+      ${r.fidelity !== "FAITHFUL_TO_INSTRUCTOR" && r.fidelity !== "USER_AUTHORED_RULES" ? '<div class="banner warn" style="margin:0 0 .6rem">Backtests of this version are <strong>not</strong> faithful instructor-method results.</div>' : ""}
+      <div class="small muted">${version.approvedBy ? `Approved by <strong>${UI.esc(version.approvedBy)}</strong> on ${UI.date(version.approvedAt)}.` : "Not approved yet."}${version.frozenAt ? ` Frozen ${UI.date(version.frozenAt)}.` : ""} Spec hash <span class="mono">${version.specHash.slice(0, 12)}</span></div>
+      <div class="row" style="margin-top:.7rem">
+        ${version.status === "DRAFT" ? `<button class="btn btn-primary sm" id="approve">Approve this version</button><button class="btn ghost sm" id="delDraft">Delete draft</button>` : ""}
+        ${version.status === "APPROVED" ? `<button class="btn btn-secondary sm" id="freeze">Freeze</button>` : ""}
+        ${version.status !== "DRAFT" ? `<button class="btn ghost sm" id="fork">Fork to edit</button><a class="btn btn-primary sm" href="/backtest?version=${version.id}">Backtest this version →</a><button class="btn ghost sm" id="pine">Pine Script</button>` : ""}
+      </div>`;
+    $("delDraft")?.addEventListener("click", async () => { if (!confirm("Delete this draft?")) return; try { await UI.api("/api/versions/" + version.id, { method: "DELETE" }); UI.toast("Draft deleted", "ok"); version = null; await loadStrategies(); } catch (e) { UI.toast(e.message, "bad"); } });
+    $("approve")?.addEventListener("click", approve); $("freeze")?.addEventListener("click", async () => { try { await UI.api(`/api/versions/${version.id}/freeze`, { method: "POST" }); UI.toast("Frozen", "ok"); await loadStrategies(version.id); } catch (e) { UI.toast(e.message, "bad"); } });
+    $("fork")?.addEventListener("click", async () => { try { const v = await UI.api(`/api/versions/${version.id}/fork`, { method: "POST" }); UI.toast("New draft created", "ok"); await loadStrategies(v.id); } catch (e) { UI.toast(e.message, "bad"); } });
+    $("pine")?.addEventListener("click", showPine);
+  }
+  // components
+  const names = [...new Set([...COMP_ORDER, ...Object.keys(components)])];
+  $("components").innerHTML = names.filter(n => components[n]).length ? `<table><tbody>${names.filter(n => components[n]).map(n => { const c = components[n]; return `<tr><td>${n}</td><td>${UI.statusPill(c.status === "source_confirmed" ? "VALID" : c.status === "missing" ? "FAILED" : "WARN").replace(/>[^<]*</, ">" + c.status.replaceAll("_", " ") + "<")}</td><td>${(c.atomIds || []).map(a => `<button class="cite" data-evidence="${a}" data-kind="atom">▶</button>`).join("")}${c.note ? `<div class="muted">${UI.esc(c.note)}</div>` : ""}</td></tr>`; }).join("")}</tbody></table>` : '<div class="muted">Provenance appears for AI-translated versions. Hand-written versions are labelled user-authored.</div>';
+  $("log").innerHTML = version ? version.changeLog.slice().reverse().map(c => `<div style="margin-bottom:.4rem"><span class="muted">${UI.date(c.at)}</span> · ${UI.esc(c.by)} — ${UI.esc(c.change)}</div>`).join("") : "";
+}
+function renderManual() {
+  if (!strategy || !strategy.manual) { $("manual").innerHTML = '<div class="muted">No instructor manual (user-authored or not extracted).</div>'; return; }
+  const m = strategy.manual, show = [["entry_rules", "Entry"], ["stop_loss_rules", "Stop-loss"], ["take_profit_rules", "Take-profit"], ["trade_management", "Management"], ["sessions_time", "Sessions"], ["risk_management", "Risk"]];
+  $("manual").innerHTML = show.map(([k, l]) => `<div style="margin-bottom:.6rem"><strong>${l}</strong>${(m[k] || []).length ? (m[k]).map(i => `<div class="manual-item">${UI.esc(i.text)} ${(i.atomIds || []).map(a => `<button class="cite" data-evidence="${a}" data-kind="atom">▶</button>`).join("")}</div>`).join("") : '<div class="manual-item missing">Not stated by the teacher</div>'}</div>`).join("") + `<a class="small" href="/library/${strategy.id}">Full manual →</a>`;
+}
+
+$("assumeForm").addEventListener("submit", (e) => { e.preventDefault(); const text = $("aText").value.trim(); if (!text) return; const comp = $("aComp").value; assumptions.push({ component: comp, text, reason: "Introduced by you to make the idea executable" }); components[comp] = { ...(components[comp] || { atomIds: [] }), status: "proposed_assumption", note: components[comp]?.note }; $("aText").value = ""; render(); });
+$("format").onclick = () => { try { $("editor").value = JSON.stringify(parse(), null, 2); } catch (e) { UI.toast(e.message, "bad"); } };
+$("validate").onclick = async () => {
+  try { const r = await UI.api("/api/spec/validate", { json: { spec: parse() } });
+    $("vresult").innerHTML = r.valid ? '<div class="banner ok" style="margin:0">Valid: every series and condition compiles.</div>' : `<div class="banner bad" style="margin:0"><strong>Problem:</strong><br>${r.errors.map(UI.esc).join("<br>")}</div>`; }
+  catch (e) { $("vresult").innerHTML = `<div class="banner bad" style="margin:0">${UI.esc(e.message)}</div>`; }
+};
+$("save").onclick = async () => {
+  try {
+    const spec = parse(), note = prompt("Describe this change for the change log", version ? "Edited rules" : "Initial draft");
+    if (note === null) return;
+    const body = { spec, note, components, assumptions: assumptions.map(a => ({ id: a.id, component: a.component, text: a.text, reason: a.reason })) };
+    const saved = version ? await UI.api("/api/versions/" + version.id, { method: "PUT", json: body }) : await UI.api("/api/versions", { json: { strategyId: strategy.id, spec, note, components, assumptions: body.assumptions, unsupported: [] } });
+    UI.toast("Saved", "ok"); await loadStrategies(saved.id);
+  } catch (e) { UI.toast(e.message, "bad"); $("vresult").innerHTML = `<div class="banner bad" style="margin:0">${UI.esc(e.message)}</div>`; }
+};
+async function approve() {
+  const boxes = [...document.querySelectorAll("#assumptions input[type=checkbox]")], missing = boxes.filter(b => !b.checked && !b.disabled);
+  if (missing.length) { UI.toast("Tick every assumption to acknowledge it before approving.", "bad"); return; }
+  if (!confirm("Approve this exact version? You confirm the rules and every listed assumption. Approved versions cannot be edited.")) return;
+  try { await UI.api(`/api/versions/${version.id}/approve`, { json: { acknowledged: assumptions.map(a => a.id) } }); UI.toast("Approved", "ok"); await loadStrategies(version.id); } catch (e) { UI.toast(e.message, "bad"); }
+}
+async function showPine() {
+  try {
+    const r = await UI.api(`/api/versions/${version.id}/pine`, { json: {} });
+    const audit = r.audit.findings.map(f => `<div class="small"><span class="pill ${f.severity === "FAIL" ? "bad" : f.severity === "WARN" ? "warn" : f.severity === "PASS" ? "ok" : ""}">${f.severity}</span> ${f.line ? `line ${f.line}: ` : ""}${UI.esc(f.message)}</div>`).join("");
+    UI.drawer.open("Pine Script v6 — " + r.versionLabel, `
+      <div class="row" style="margin-bottom:.6rem"><span class="pill ${r.equivalence === "FULL" ? "ok" : r.equivalence === "APPROXIMATE" ? "warn" : "bad"}">equivalence: ${r.equivalence.replaceAll("_", " ").toLowerCase()}</span><span class="pill ${r.audit.verdict === "PASS" ? "ok" : r.audit.verdict === "WARN" ? "warn" : "bad"}">lookahead audit: ${r.audit.verdict.toLowerCase()}</span>
+        <button class="btn sm ghost" id="pcopy">Copy</button><button class="btn sm ghost" id="pdl">Download .pine</button></div>
+      ${r.unsupported.length ? `<div class="banner bad">${r.unsupported.map(UI.esc).join("<br>")}</div>` : ""}
+      ${r.warnings.map(w => `<div class="small muted">⚠ ${UI.esc(w)}</div>`).join("")}<div style="margin:.6rem 0">${audit}</div>
+      <p class="small muted">Open TradingView → Pine Editor → paste → Add to chart → Strategy Tester. Compile in TradingView before trusting it; export the list of trades and upload it on the backtest run page to compare with the independent engine.</p>
+      <pre class="code-block">${UI.esc(r.script)}</pre>`);
+    $("pcopy").onclick = () => UI.copy(r.script); $("pdl").onclick = () => UI.download((strategy.name || "strategy").replace(/[^A-Za-z0-9]+/g, "_") + ".pine", r.script);
+  } catch (e) { UI.toast(e.message, "bad"); }
+}
+
+$("strategy").onchange = () => loadStrategies();
+$("version").onchange = loadVersion;
+$("newCustom").onclick = async () => { const name = prompt("Name your strategy"); if (!name) return; try { const s = await UI.api("/api/library/custom", { json: { name } }); location.href = "/editor?strategy=" + s.id; } catch (e) { UI.toast(e.message, "bad"); } };
+$("template").onchange = () => { const t = templates[$("template").value]; if (t) { if (!editable()) { UI.toast("Fork the version first", "bad"); return; } $("editor").value = JSON.stringify(t, null, 2); } $("template").value = ""; };
+$("translate").onclick = async () => {
+  if (!strategy) { UI.toast("Choose a strategy first", "bad"); return; } $("translate").disabled = true;
+  try { const job = await UI.api(`/api/library/strategies/${strategy.id}/translate`, { method: "POST" }); const done = await UI.pollJob(job.id, j => $("translate").textContent = j.message.slice(0, 36)); UI.toast("AI draft created — review before approving", "ok"); await loadStrategies(done.result.versionId); }
+  catch (e) { UI.toast(e.message, "bad"); } $("translate").disabled = false; $("translate").textContent = "AI draft from source rules";
+};
+(async () => {
+  templates = await UI.api("/api/spec/templates");
+  $("template").innerHTML += Object.entries(templates).map(([k, v]) => `<option value="${k}">${UI.esc(v.name)}</option>`).join("");
+  if ($("strategy").value) await loadStrategies({{ version_id|tojson }} || undefined); else render();
+})();
+</script>
+{% endblock %}

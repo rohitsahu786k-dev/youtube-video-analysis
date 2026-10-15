@@ -1,0 +1,8 @@
+# Replace with your domain; Caddy obtains and renews the HTTPS certificate automatically.
+{$DOMAIN:localhost} {
+	encode gzip
+	request_body {
+		max_size 250MB
+	}
+	reverse_proxy web:8000
+}

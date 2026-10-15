@@ -46,7 +46,8 @@ async def video_detail_page(request: Request, video_id: str):
     v = await db.get_video(video_id)
     if not v:
         raise HTTPException(status_code=404, detail="Video not found")
-    trades = await db.get_trades(video_id)
+    trades = await db.get_trades(v["id"])
+    details = await db.get("video_details", v["id"]) or {}
     return templates.TemplateResponse(
         request=request,
         name="video_detail.html",
@@ -54,8 +55,8 @@ async def video_detail_page(request: Request, video_id: str):
             "active_page": "videos",
             "video": v,
             "trades": trades,
-            "events": v.get("detectedEvents", []),
-            "transcript": v.get("transcript", [])
+            "events": details.get("events") or v.get("detectedEvents", []),
+            "transcript": details.get("transcript") or v.get("transcript", [])
         }
     )
 
